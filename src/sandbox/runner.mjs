@@ -21,16 +21,28 @@ const realFetch = globalThis.fetch;
 const allowed = (job.allowedDomains ?? []).map((d) => d.toLowerCase());
 const isAllowed = (host) => allowed.some((d) => host === d || host.endsWith("." + d));
 
-globalThis.fetch = async (resource, init = {}) => {
-  const url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
+const checkUrl = (url) => {
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`Blocked protocol ${url.protocol}`);
   if (!isAllowed(url.hostname.toLowerCase())) {
     throw new Error(`Blocked by Forge sandbox: ${url.hostname} is not in this tool's allowed domains (${allowed.join(", ") || "none"})`);
   }
-  fetched.push(url.href);
+};
+
+globalThis.fetch = async (resource, init = {}) => {
+  let url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
   const headers = new Headers(init.headers ?? {});
-  if (!headers.has("user-agent")) headers.set("user-agent", "Forge/1.0 (+https://github.com/SYEDMDSAAD/forge)");
-  return realFetch(url, { ...init, headers, signal: AbortSignal.timeout(job.fetchTimeoutMs ?? 10000) });
+  if (!headers.has("user-agent")) headers.set("user-agent", "Forge/1.0 (MCP skill sandbox)");
+  const signal = AbortSignal.timeout(job.fetchTimeoutMs ?? 10000);
+  // Follow redirects by hand so every hop is checked against the allowlist.
+  for (let hop = 0; hop <= 5; hop++) {
+    checkUrl(url);
+    fetched.push(url.href);
+    const res = await realFetch(url, { ...init, headers, signal, redirect: "manual" });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) return res;
+    url = new URL(location, url);
+  }
+  throw new Error("Too many redirects");
 };
 
 const withTimeout = (promise, ms, label) =>
