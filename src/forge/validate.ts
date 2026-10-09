@@ -67,3 +67,17 @@ export async function syntaxError(code: string): Promise<string | null> {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// A single-quoted string with an apostrophe between letters inside it.
+const BROKEN_SINGLE_QUOTED = /'((?:[^'\n\\]|\\.|(?<=[A-Za-z])'(?=[A-Za-z]))*)'/g;
+
+/**
+ * Small models often write 'I couldn't do that', which ends the string at the
+ * apostrophe. Rewrite such strings as template literals. Strings without an
+ * inner apostrophe are left alone.
+ */
+export function fixApostrophes(code: string): string {
+  return code.replace(BROKEN_SINGLE_QUOTED, (whole, body: string) =>
+    /[A-Za-z]'[A-Za-z]/.test(body) ? "`" + body.replace(/`/g, "\\`").replace(/\$\{/g, "\\${") + "`" : whole,
+  );
+}

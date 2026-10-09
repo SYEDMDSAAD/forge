@@ -8,7 +8,7 @@ import { runInSandbox } from "../sandbox/sandbox.js";
 import { CATALOG, catalogById, type Source } from "./catalog.js";
 import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
 import type { ForgeEvent, TestReport, ToolSpec } from "./types.js";
-import { syntaxError, validateSpec } from "./validate.js";
+import { fixApostrophes, syntaxError, validateSpec } from "./validate.js";
 
 interface Plan {
   feasible: boolean;
@@ -48,6 +48,26 @@ const PLAN_SCHEMA = {
 
 const CODE_SCHEMA = { type: "object", properties: { code: { type: "string" } }, required: ["code"] };
 
+const REVIEW_SCHEMA = {
+  type: "object",
+  properties: { natural: { type: "boolean" }, problem: { type: "string" } },
+  required: ["natural", "problem"],
+};
+
+/** The model listens to its own answer once; judging a sentence is easier for it than writing one. */
+async function reviewSpeech(request: string, speech: string): Promise<string | null> {
+  const review = await ask<{ natural: boolean; problem: string }>(
+    SYSTEM,
+    `The user asked a voice assistant: "${request}"
+The assistant will say exactly: "${speech}"
+
+Is that a natural, grammatical English answer to the question, with nothing garbled, missing or repeated? Minor style is fine.
+Set natural=true unless there is a clear problem. If natural=false, describe the problem in one sentence.`,
+    REVIEW_SCHEMA,
+  );
+  return review.natural ? null : review.problem || "the sentence is not natural English";
+}
+
 // Checks every skill must pass on the example input (which is a valid request,
 // so "sorry, not found" is a failure there). Kept in sync with speechProblems().
 const questionOf = (request: string) => request.toLowerCase().replace(/[?.!\s]+$/, "");
@@ -58,6 +78,7 @@ export function speechAssert(request: string): string {
     "!/undefined|NaN|\\[object Object\\]|\\bnull\\b/.test(result.speech)",
     "!/sorry|couldn.?t|could not|unable|not find|apolog/i.test(result.speech)",
     "!/\\?\\s*$/.test(result.speech)",
+    "!/\\d\\.\\d{3,}/.test(result.speech)",
     `!result.speech.toLowerCase().includes(${JSON.stringify(questionOf(request))})`,
   ].join(" && ");
 }
@@ -72,6 +93,7 @@ function speechProblems(result: unknown, request: string): string[] {
   if (/sorry|couldn.?t|could not|unable|not find|apolog/i.test(r.speech))
     p.push("speech is an apology, but the example input is valid: the request or the parsing is wrong (check the URL and field names against the example response)");
   if (/\?\s*$/.test(r.speech)) p.push("speech must end with an answer, not a question");
+  if (/\d\.\d{3,}/.test(r.speech)) p.push("round the numbers in speech (Math.round, or toFixed(1) for small values)");
   if (r.speech.toLowerCase().includes(questionOf(request))) p.push("speech repeats the user's question; say only the answer");
   return p;
 }
@@ -222,7 +244,18 @@ ${evidence}`;
   onEvent({ stage: "thinking", message: `Writing the code against ${src.domains.join(" and ")}` });
   let { code } = await ask<{ code: string }>(SYSTEM, `${brief}\n\n${CONTRACT}`, CODE_SCHEMA);
 
+  let reviewed = false;
+  // A version that passed its test but whose wording was flagged; used if the rewording breaks it.
+  let working: SmithResult | undefined;
   for (let attempt = 1; attempt <= config.maxSubmissions; attempt++) {
+    // Mend the most common small-model slip ('couldn't' in single quotes) without a model round trip.
+    if (await syntaxError(code)) {
+      const mended = fixApostrophes(code);
+      if (mended !== code && !(await syntaxError(mended))) {
+        code = mended;
+        onEvent({ stage: "repair", message: "Fixed an apostrophe inside a quoted string" });
+      }
+    }
     const spec = buildSpec(request, plan, src, code);
     onEvent({ stage: "submit", message: `Wrote ${spec.name} (attempt ${attempt})` });
 
@@ -236,9 +269,23 @@ ${evidence}`;
     } else {
       onEvent({ stage: "test", message: "Running a live test in the sandbox" });
       const report = await testSpec(spec);
-      if (report.passed) {
+      const speech = (report.results[0]?.result as { speech?: string } | undefined)?.speech ?? "";
+      const problem = report.passed && !reviewed && attempt < config.maxSubmissions ? await reviewSpeech(request, speech) : null;
+      reviewed ||= report.passed;
+      if (report.passed && !problem) {
         onEvent({ stage: "ready", message: `All tests passed for ${spec.name}` });
         return { spec, report, attempts: attempt };
+      }
+      if (problem) {
+        onEvent({ stage: "repair", message: `Answer reads badly: ${problem.slice(0, 80)}` });
+        working = { spec, report, attempts: attempt };
+        failure = `The code works, but the spoken answer has a problem: ${problem}\nIt said: "${speech}"\nChange only how speech is worded.`;
+        ({ code } = await ask<{ code: string }>(
+          SYSTEM,
+          `${brief}\n\n${CONTRACT}\n\nYour previous code:\n${code}\n\n${failure}\n\nReturn the complete corrected module.`,
+          CODE_SCHEMA,
+        ));
+        continue;
       }
       failure = `The live test with input ${JSON.stringify(spec.tests[0].input)} failed:\n${describeFailure(report, request)}`;
       onEvent({ stage: "repair", message: `Test failed: ${failure.split("\n")[1]?.slice(0, 80) ?? "fixing"}` });
@@ -261,6 +308,10 @@ ${evidence}`;
         CODE_SCHEMA,
       ));
     }
+  }
+  if (working) {
+    onEvent({ stage: "ready", message: `All tests passed for ${working.spec.name}` });
+    return working;
   }
   throw new ForgeFailed("I tried a few times but couldn't get that working reliably.");
 }

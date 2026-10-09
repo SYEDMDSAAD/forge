@@ -61,6 +61,21 @@ async function loadTool(code) {
   return mod.default;
 }
 
+// Mechanical clean-up of the spoken answer, so small slips in generated code
+// don't reach the listener: line breaks, "..", doubled words, " | ", lowercase start.
+const tidySpeech = (speech) =>
+  speech
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/\s+\|\s+/g, ": ")
+    .replace(/\b(\w+)(\s+\1\b)+/gi, "$1")
+    .replace(/(?<!\.)\.\.(?!\.)/g, ".")
+    .replace(/\s+([.,!?;:])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/^[a-z]/, (c) => c.toUpperCase());
+
+const tidy = (result) => (result && typeof result.speech === "string" ? { ...result, speech: tidySpeech(result.speech) } : result);
+
 async function main() {
   if (job.mode === "probe") {
     const res = await fetch(job.url, { method: job.method ?? "GET", headers: job.headers ?? {} });
@@ -77,7 +92,7 @@ async function main() {
   const run = await loadTool(job.code);
 
   if (job.mode === "run") {
-    const result = await withTimeout(run(job.input ?? {}), job.timeoutMs, "Tool");
+    const result = tidy(await withTimeout(run(job.input ?? {}), job.timeoutMs, "Tool"));
     return { ok: true, result };
   }
 
@@ -86,7 +101,7 @@ async function main() {
     for (const test of job.tests) {
       const started = Date.now();
       try {
-        const result = await withTimeout(run(test.input ?? {}), job.timeoutMs, `Test "${test.name}"`);
+        const result = tidy(await withTimeout(run(test.input ?? {}), job.timeoutMs, `Test "${test.name}"`));
         if (!result || typeof result.speech !== "string" || !result.speech.trim()) {
           throw new Error("Tool must return an object with a non-empty `speech` string");
         }

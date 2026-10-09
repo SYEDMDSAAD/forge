@@ -54,7 +54,7 @@ export const CATALOG: Source[] = [
         example: "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi,pm2_5,pm10",
       },
     ],
-    notes: "US AQI bands: 0-50 good, 51-100 moderate, 101-150 unhealthy for sensitive groups, 151-200 unhealthy, 201-300 very unhealthy, 301+ hazardous.",
+    notes: "US AQI bands: 0-50 good, 51-100 moderate, 101-150 unhealthy for sensitive groups, 151-200 unhealthy, 201-300 very unhealthy, 301+ hazardous. Phrase it like `The air quality in Delhi is unhealthy, with an AQI of 165.`",
   },
   {
     id: "iss",
@@ -67,9 +67,9 @@ export const CATALOG: Source[] = [
         example: "https://api.wheretheiss.at/v1/satellites/25544",
       },
       {
-        url: "https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&zoom=3",
-        returns: "{ address?: { country } } or { error: 'Unable to geocode' } when over the ocean",
-        example: "https://nominatim.openstreetmap.org/reverse?lat=18.5&lon=73.8&format=json&zoom=3",
+        url: "https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&zoom=3&accept-language=en",
+        returns: "{ address?: { country } } (country name in English) or { error: 'Unable to geocode' } when over the ocean",
+        example: "https://nominatim.openstreetmap.org/reverse?lat=18.5&lon=73.8&format=json&zoom=3&accept-language=en",
       },
     ],
     notes: "No input needed. Over the ocean there is no country: say it's over the ocean.",
@@ -80,12 +80,12 @@ export const CATALOG: Source[] = [
     domains: ["api.frankfurter.dev"],
     endpoints: [
       {
-        url: "https://api.frankfurter.dev/v1/latest?base={FROM}&symbols={TO}&amount={amount}",
-        returns: "{ amount, base, date, rates: { [TO]: convertedAmount } }",
-        example: "https://api.frankfurter.dev/v1/latest?base=USD&symbols=INR&amount=100",
+        url: "https://api.frankfurter.dev/v1/latest?base={FROM}&symbols={TO}",
+        returns: "{ base, date, rates: { [TO]: rate } } where rate is the value of ONE unit of FROM in TO",
+        example: "https://api.frankfurter.dev/v1/latest?base=USD&symbols=INR",
       },
     ],
-    notes: "Currency codes are 3 uppercase letters (USD, INR, EUR). rates[TO] is already multiplied by amount.",
+    notes: "Currency codes are 3 uppercase letters (USD, INR, EUR). converted = amount * rates[TO], multiplied exactly once. Say the amount with its unit, e.g. `100 US dollars is about 9,678 rupees`.",
   },
   {
     id: "crypto",
