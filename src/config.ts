@@ -3,7 +3,11 @@ import path from "node:path";
 export type Provider = "anthropic" | "bedrock";
 export type SandboxKind = "docker" | "process";
 
-const provider = (process.env.FORGE_PROVIDER ?? "anthropic") as Provider;
+try {
+  process.loadEnvFile(); // optional .env in the working directory
+} catch {}
+
+const provider =(process.env.FORGE_PROVIDER ?? "anthropic") as Provider;
 
 export const config = {
   port: Number(process.env.PORT ?? 8787),
