@@ -2,6 +2,11 @@
 // from stdin, writes one JSON result to stdout. Untrusted tool code never sees
 // the real fetch: every request goes through the domain allowlist below.
 import { Buffer } from "node:buffer";
+import net from "node:net";
+
+// Node gives each IPv6/IPv4 connect attempt 250ms by default; on high-latency
+// links (e.g. India -> EU APIs) that fails ~1 in 4 requests with ETIMEDOUT.
+net.setDefaultAutoSelectFamilyAttemptTimeout(2000);
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -31,7 +36,12 @@ globalThis.fetch = async (resource, init = {}) => {
 const withTimeout = (promise, ms, label) =>
   Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))]);
 
-const errorText = (e) => (e && e.stack ? String(e.stack).split("\n").slice(0, 4).join("\n") : String(e));
+const errorText = (e) => {
+  const text = e && e.stack ? String(e.stack).split("\n").slice(0, 4).join("\n") : String(e);
+  // fetch() hides the network reason ("fetch failed") in e.cause.
+  const cause = e?.cause ? ` (cause: ${e.cause.code ?? e.cause.message ?? e.cause})` : "";
+  return text.replace(/^(.*)$/m, `$1${cause}`);
+};
 
 async function loadTool(code) {
   const mod = await import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));

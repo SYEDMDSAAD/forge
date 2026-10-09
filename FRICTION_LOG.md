@@ -19,3 +19,12 @@ Entries recorded while building Forge. Severity: Blocker / High / Medium / Low.
 - **Severity:** Medium
 - **Workaround:** `markTaskCall()` in `src/index.ts`; two delivery paths in `src/server.ts`; covered by `scripts/e2e-tasks.ts`.
 - **Suggestion:** Expose `isTaskRequest` on the `createTask` extra, and let `extra.sendRequest` route to the task queue only when the call was task-augmented.
+
+## 3. Alexa+ MCP Toolkit: which client features and limits apply is unclear
+- **Task:** Plan an Alexa+ add-on around MCP spec 2025-11-25 features (dynamic tool lists, elicitation, tasks).
+- **Steps:** Read the MCP Toolkit overview and quickstart on developer.amazon.com.
+- **Expected:** A table of which client features Alexa+ supports (tools/list_changed, elicitation, tasks, progress, sampling) and what the latency limit applies to.
+- **Actual:** "Alexa+ refreshes tool information only on deployment" means runtime tool changes are ignored, which only shows up in the quickstart checklist. Elicitation, tasks and progress aren't mentioned at all. "Round-trip query response latency of less than 500 ms" doesn't say whether it covers each tools/call, and many real tools that call public APIs can't meet it. The OAuth 2.1 checklist is marked "Required" without saying whether add-ons without user accounts need it. The toolkit is US-only, which isn't stated on the hackathon page.
+- **Severity:** High (it changed the architecture)
+- **Workaround:** Fixed tool surface (`use_skill`, `list_capabilities`); forge_capability answers "learning" within ~400ms and finishes in the background; voice consent via `approve_capability` when the client can't elicit; warm sandbox pool.
+- **Suggestion:** Publish a client-capabilities matrix for Alexa+, clarify the latency rule per MCP method, and list supported countries on the hackathon page.

@@ -1,6 +1,7 @@
 // Drives forge_capability two ways against a mock smith (FORGE_PROVIDER=mock):
 //  1. as an MCP task (callToolStream): task id, status updates, consent via tasks/result
-//  2. as a plain tools/call: SDK auto-polling, consent over the open response stream
+//  2. like Alexa+: plain tools/call, no elicitation, fixed tool list. Must answer
+//     fast ("learning"), then list_capabilities -> approve_capability -> use_skill.
 import { rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -21,13 +22,15 @@ const check = (ok: boolean, what: string) => {
   if (!ok) failed = true;
 };
 
-async function connect() {
-  const client = new Client({ name: "e2e-tasks", version: "1" }, { capabilities: { elicitation: { form: {} } } });
+async function connect(elicitation = true) {
+  const client = new Client({ name: "e2e-tasks", version: "1" }, { capabilities: elicitation ? { elicitation: { form: {} } } : {} });
   const prompts: string[] = [];
-  client.setRequestHandler(ElicitRequestSchema, async (req) => {
-    prompts.push(req.params.message);
-    return { action: "accept", content: { install: true } };
-  });
+  if (elicitation) {
+    client.setRequestHandler(ElicitRequestSchema, async (req) => {
+      prompts.push(req.params.message);
+      return { action: "accept", content: { install: true } };
+    });
+  }
   let listChanged = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => void listChanged++);
   await client.connect(new StreamableHTTPClientTransport(new URL("http://localhost:8798/mcp")));
@@ -57,17 +60,39 @@ try {
     await new Promise((r) => setTimeout(r, 300));
     check(listChanged() >= 1, "tools/list_changed after install");
     const call = await client.callTool({ name: "get_current_weather", arguments: { city: "Mumbai" } });
-    check(/degrees in Mumbai/.test(String((call.structuredContent as any)?.speech)), `forged tool answers: ${(call.structuredContent as any)?.speech}`);
+    check(/degrees in Mumbai/.test(String((call.structuredContent as any)?.speech)), `forged tool answers: ${(call.structuredContent as any)?.speech ?? JSON.stringify(call.content)}`);
     await client.callTool({ name: "remove_capability", arguments: { name: "get_current_weather" } });
     await client.close();
   }
 
-  // 2. Plain call (no task param): automatic polling
+  // 2. Alexa-like client
   {
-    const { client, prompts } = await connect();
-    const res = await client.callTool({ name: "forge_capability", arguments: { request: "what's the weather in Pune" } }, undefined, { timeout: 120_000 });
-    check(prompts.length === 1, "consent prompt delivered on plain call");
-    check((res.structuredContent as any)?.status === "installed", `plain call result: ${(res.structuredContent as any)?.status}`);
+    const { client, prompts } = await connect(false);
+    let t0 = performance.now();
+    const res = await client.callTool({ name: "forge_capability", arguments: { request: "what's the weather in Pune" } });
+    const ms = Math.round(performance.now() - t0);
+    check((res.structuredContent as any)?.status === "learning" && ms < 1000, `plain call answers "learning" fast (${ms}ms)`);
+
+    let list: any;
+    for (let i = 0; i < 60; i++) {
+      list = (await client.callTool({ name: "list_capabilities", arguments: {} })).structuredContent;
+      if (list.pending.length) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    console.log("  list_capabilities says:", (await client.callTool({ name: "list_capabilities", arguments: {} })).content[0].text);
+    check(list.pending.length === 1, "skill waits as pending for the user's OK");
+    check(prompts.length === 0, "no elicitation sent to a client without it");
+
+    const approved = await client.callTool({ name: "approve_capability", arguments: { id: list.pending[0].id, approve: true } });
+    check((approved.structuredContent as any)?.status === "installed", "approve_capability installs it");
+
+    const bad = await client.callTool({ name: "use_skill", arguments: { name: "get_current_weather", input: {} } });
+    check(bad.isError === true && /Wrong input/.test(String((bad.content as any)[0].text)), "use_skill rejects bad input with the schema");
+
+    t0 = performance.now();
+    const used = await client.callTool({ name: "use_skill", arguments: { name: "get_current_weather", input: { city: "Delhi" } } });
+    const speech = String((used.structuredContent as any)?.speech);
+    check(/degrees in Delhi/.test(speech), `use_skill answers: ${used.isError ? JSON.stringify(used.content) : speech} (${Math.round(performance.now() - t0)}ms)`);
     await client.callTool({ name: "remove_capability", arguments: { name: "get_current_weather" } });
     await client.close();
   }

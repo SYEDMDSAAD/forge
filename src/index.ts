@@ -4,6 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
+import { warmSandbox } from "./sandbox/sandbox.js";
 import { createServer, markTaskCall, registry } from "./server.js";
 
 const app = createMcpExpressApp();
@@ -50,6 +51,7 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, provider: config.provider, model: config.model, sandbox: config.sandbox, skills: registry.active().length, sessions: transports.size });
 });
 
+warmSandbox();
 app.listen(config.port, () => {
   console.log(`Forge MCP server on http://localhost:${config.port}/mcp (${config.provider}/${config.model}, sandbox=${config.sandbox})`);
 });

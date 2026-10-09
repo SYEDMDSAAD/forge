@@ -15,6 +15,7 @@ import { ForgeFailed, forgeTool } from "./forge/smith.js";
 import { Registry } from "./forge/registry.js";
 import type { Capability, ForgeEvent } from "./forge/types.js";
 import { runInSandbox } from "./sandbox/sandbox.js";
+import { config } from "./config.js";
 
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -37,13 +38,52 @@ export function markTaskCall(sessionId: string, requestId: string | number) {
 }
 
 const INSTRUCTIONS = `Forge lets this assistant learn new abilities while talking to the user.
-When the user asks for something none of your tools can do, and it could be done by reading public information on the internet, tell the user you'll learn it (e.g. "Give me a minute, I'll learn how") and call forge_capability with their request in their own words. When it returns, the new tool is installed: call it right away to answer the user.
-Forged tools return a short \`speech\` string written to be spoken aloud.`;
+- When the user asks for something none of your tools can do, and it could be answered from public information on the internet, say you'll learn it (e.g. "Give me a minute, I'll learn how") and call forge_capability with their request in their own words.
+- If forge_capability answers that it is still learning, tell the user and offer to check back; list_capabilities shows progress.
+- A skill that is built but waiting for the user's OK shows as pending in list_capabilities: say what it does and which sites it uses, ask the user, then call approve_capability.
+- To use a learned skill, call it directly if it is in your tool list, otherwise call use_skill with its name and input (list_capabilities shows each skill's input).
+Learned skills return a short \`speech\` string written to be spoken aloud.`;
+
+/** One forge_capability call, tracked so clients that can't wait can check on it later. */
+interface ForgeJob {
+  id: string;
+  request: string;
+  status: "learning" | "pending_approval" | "installed" | "declined" | "failed";
+  message: string;
+  startedAt: string;
+  capabilityId?: string;
+}
+const jobs = new Map<string, ForgeJob>();
+
+function trackJob(request: string): ForgeJob {
+  const job: ForgeJob = { id: randomUUID().slice(0, 8), request, status: "learning", message: "Starting", startedAt: new Date().toISOString() };
+  jobs.set(job.id, job);
+  const finished = [...jobs.values()].filter((j) => j.status !== "learning");
+  for (const old of finished.slice(0, Math.max(0, finished.length - 20))) jobs.delete(old.id);
+  return job;
+}
+
+const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 
 const text = (t: string, structured?: Record<string, unknown>): CallToolResult => ({
   content: [{ type: "text", text: t }],
   ...(structured ? { structuredContent: structured } : {}),
 });
+
+/** Run a learned skill in a fresh sandbox runner. */
+async function runSkill(cap: Capability, input: Record<string, unknown>): Promise<CallToolResult> {
+  const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
+  registry.recordUse(cap.id);
+  if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
+  const result = out.result as { speech: string; data?: unknown };
+  return {
+    content: [
+      { type: "text", text: result.speech },
+      ...(result.data !== undefined ? [{ type: "text" as const, text: JSON.stringify(result.data) }] : []),
+    ],
+    structuredContent: { speech: result.speech, data: result.data ?? null },
+  };
+}
 
 function inputSchemaFor(cap: Capability) {
   try {
@@ -92,19 +132,7 @@ export function createServer(): McpServer {
         annotations: { readOnlyHint: true, openWorldHint: true },
         _meta: { "forge/capabilityId": cap.id, "forge/allowedDomains": cap.spec.allowedDomains },
       },
-      async (input: Record<string, unknown>) => {
-        const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
-        registry.recordUse(cap.id);
-        if (!out.ok) return { ...text(`The ${cap.spec.title} tool failed: ${out.error}`), isError: true };
-        const result = out.result as { speech: string; data?: unknown };
-        return {
-          content: [
-            { type: "text", text: result.speech },
-            ...(result.data !== undefined ? [{ type: "text" as const, text: JSON.stringify(result.data) }] : []),
-          ],
-          structuredContent: { speech: result.speech, data: result.data ?? null },
-        };
-      },
+      (input: Record<string, unknown>) => runSkill(cap, input),
     );
     forged.set(cap.spec.name, handle);
   };
@@ -135,7 +163,8 @@ export function createServer(): McpServer {
   };
 
   /** Ask the human before a new capability goes live. Uses MCP elicitation when the client supports it. */
-  type Elicit = (params: ElicitRequestFormParams) => Promise<ElicitResult>;
+  /** Resolves null when the user can't be asked right now; the skill then waits as pending. */
+  type Elicit = (params: ElicitRequestFormParams) => Promise<ElicitResult | null>;
   const askConsent = async (cap: Capability, elicit: Elicit): Promise<"accept" | "decline" | "unsupported"> => {
     if (!mcp.server.getClientCapabilities()?.elicitation) return "unsupported";
     const passed = cap.testReport.results.filter((r) => r.passed).length;
@@ -151,15 +180,22 @@ export function createServer(): McpServer {
         required: ["install"],
       },
     });
+    if (!res) return "unsupported";
     return res.action === "accept" && res.content?.install === true ? "accept" : "decline";
   };
 
   /** Build, test, ask consent, install. Shared by the task and the plain-call paths. */
-  const forgeAndInstall = async (request: string, emit: (e: ForgeEvent) => void, elicit: Elicit): Promise<CallToolResult> => {
+  const forgeAndInstall = async (job: ForgeJob, emit: (e: ForgeEvent) => void, elicit: Elicit): Promise<CallToolResult> => {
+    const request = job.request;
     let built;
     try {
-      built = await forgeTool(request, emit);
+      built = await forgeTool(request, (e) => {
+        job.message = e.message;
+        emit(e);
+      });
     } catch (e) {
+      job.status = "failed";
+      job.message = e instanceof Error ? e.message : String(e);
       if (e instanceof ForgeFailed) return text(e.message, { status: "failed", reason: e.message });
       throw e;
     }
@@ -175,10 +211,15 @@ export function createServer(): McpServer {
       uses: 0,
     };
     registry.addPending(cap);
+    job.capabilityId = cap.id;
+    job.status = "pending_approval";
+    job.message = `Built ${cap.spec.title}; waiting for the user's OK`;
 
     const consent = await askConsent(cap, elicit);
     if (consent === "decline") {
       registry.remove(cap.id);
+      job.status = "declined";
+      job.message = "The user declined it";
       return text("The user chose not to install the new skill. It has been discarded.", { status: "declined" });
     }
     if (consent === "unsupported") {
@@ -189,7 +230,9 @@ export function createServer(): McpServer {
       );
     }
     registry.activate(cap.id);
-    return text(`Installed the new tool "${cap.spec.name}". Call it now to answer the user's request.`, {
+    job.status = "installed";
+    job.message = `Installed ${cap.spec.title}`;
+    return text(`Installed the new skill "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request.`, {
       status: "installed",
       capability: summarize(cap),
     });
@@ -200,7 +243,7 @@ export function createServer(): McpServer {
     {
       title: "Learn a new skill",
       description:
-        "Builds, tests and installs a brand-new tool for a request that no existing tool can handle (anything answerable from public internet data: live status, schedules, prices, notices, feeds, lookups). Takes 30-120 seconds. Pass the user's request in their own words.",
+        "Builds, tests and installs a brand-new skill for a request that no existing tool can handle (anything answerable from public internet data: live status, schedules, prices, notices, feeds, lookups). Learning takes 30-120 seconds; if the client can't wait, this returns at once with status 'learning' and the skill shows up in list_capabilities when it's ready. Pass the user's request in their own words.",
       inputSchema: {
         request: z.string().min(5).describe("What the user wants, in their words, including any specifics (places, names, numbers)"),
       },
@@ -209,16 +252,29 @@ export function createServer(): McpServer {
     },
     {
       async createTask({ request }, extra) {
-        const task = await extra.taskStore.createTask({ ttl: extra.taskRequestedTtl ?? 15 * 60_000, pollInterval: 1000 });
-        const key = `${extra.sessionId}:${extra.requestId}`;
-        const asTask = taskCalls.delete(key);
+        const asTask = taskCalls.delete(`${extra.sessionId}:${extra.requestId}`);
+        // pollInterval is advice to task clients; for plain calls it paces the SDK's own
+        // internal polling, which must not add latency to the "learning" answer.
+        const task = await extra.taskStore.createTask({ ttl: extra.taskRequestedTtl ?? 15 * 60_000, pollInterval: asTask ? 1000 : 50 });
+        const job = trackJob(request);
         const progress = report(extra);
+        // A plain call that outlives FORGE_WAIT_MS is answered "still learning";
+        // the work carries on detached from the request.
+        let settled = false;
+        let detached = false;
+        const settle = async (status: "completed" | "failed", result: CallToolResult) => {
+          if (settled) return;
+          settled = true;
+          await extra.taskStore.storeTaskResult(task.taskId, status, result).catch(() => {});
+        };
 
         const emit = (e: ForgeEvent) => {
+          if (detached) return;
           void progress(e);
           void extra.taskStore.updateTaskStatus(task.taskId, "working", e.message).catch(() => {});
         };
         const elicit: Elicit = async (params) => {
+          if (detached) return null;
           if (!asTask) return mcp.server.elicitInput(params, { relatedRequestId: extra.requestId });
           // Queued for delivery on the client's tasks/result call while the task shows input_required.
           await extra.taskStore.updateTaskStatus(task.taskId, "input_required", "Waiting for the user's OK");
@@ -229,14 +285,28 @@ export function createServer(): McpServer {
           return res;
         };
 
+        if (!asTask && Number.isFinite(config.forgeWaitMs)) {
+          setTimeout(() => {
+            if (settled) return;
+            detached = true;
+            void settle(
+              "completed",
+              text(
+                `I'm learning that now. It usually takes a minute or two. Tell the user, and check list_capabilities in a bit: ` +
+                  `when the skill is ready it will need the user's OK before it's installed.`,
+                { status: "learning", jobId: job.id },
+              ),
+            );
+          }, config.forgeWaitMs);
+        }
+
         void (async () => {
           try {
-            const result = await forgeAndInstall(request, emit, elicit);
-            await extra.taskStore.storeTaskResult(task.taskId, "completed", result);
+            await settle("completed", await forgeAndInstall(job, emit, elicit));
           } catch (e) {
-            await extra.taskStore
-              .storeTaskResult(task.taskId, "failed", { ...text(`Forge error: ${e instanceof Error ? e.message : e}`), isError: true })
-              .catch(() => {});
+            job.status = "failed";
+            job.message = e instanceof Error ? e.message : String(e);
+            await settle("failed", { ...text(`Forge error: ${job.message}`), isError: true });
           }
         })();
         return { task };
@@ -261,7 +331,40 @@ export function createServer(): McpServer {
         return text("Discarded.", { status: "declined" });
       }
       registry.activate(id);
-      return text(`Installed "${cap.spec.name}". Call it now to answer the user's request.`, { status: "installed", capability: summarize(cap) });
+      for (const job of jobs.values()) if (job.capabilityId === id) job.status = "installed";
+      return text(`Installed "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request.`, {
+        status: "installed",
+        capability: summarize(cap),
+      });
+    },
+  );
+
+  mcp.registerTool(
+    "use_skill",
+    {
+      title: "Use a learned skill",
+      description:
+        "Runs a skill this assistant has learned, by name. Use it for any skill listed by list_capabilities that isn't in your tool list directly. Returns a short sentence to say to the user.",
+      inputSchema: {
+        name: z.string().describe("The skill's name from list_capabilities, e.g. get_current_weather"),
+        input: z.record(z.string(), z.unknown()).default({}).describe("Arguments matching the skill's input schema"),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ name, input }) => {
+      const cap = registry.byName(name);
+      if (!cap) {
+        const names = registry.active().map((c) => c.spec.name);
+        return { ...text(`No learned skill called "${name}". Learned skills: ${names.join(", ") || "none yet"}.`), isError: true };
+      }
+      const parsed = inputSchemaFor(cap).safeParse(input);
+      if (!parsed.success) {
+        return {
+          ...text(`Wrong input for ${name}: ${z.prettifyError(parsed.error)}\nExpected input schema: ${JSON.stringify(cap.spec.inputSchema)}`),
+          isError: true,
+        };
+      }
+      return runSkill(cap, parsed.data as Record<string, unknown>);
     },
   );
 
@@ -269,15 +372,28 @@ export function createServer(): McpServer {
     "list_capabilities",
     {
       title: "List learned skills",
-      description: "Lists the skills this assistant has taught itself, with what they access and how often they've been used.",
+      description:
+        "Lists the skills this assistant has taught itself (with each one's input, for use_skill), skills waiting for the user's OK, and skills still being learned.",
       annotations: { readOnlyHint: true },
     },
     async () => {
-      const caps = registry.active().map(summarize);
-      const speech = caps.length
-        ? `I've learned ${caps.length} skill${caps.length > 1 ? "s" : ""}: ${caps.map((c) => c.title).join(", ")}.`
-        : "I haven't learned any new skills yet.";
-      return text(speech, { capabilities: caps });
+      const skills = registry.active().map((c) => ({ ...summarize(c), inputSchema: c.spec.inputSchema }));
+      const pending = registry.pending().map(summarize);
+      const learning = [...jobs.values()].filter((j) => j.status === "learning");
+      const failed = [...jobs.values()].filter((j) => j.status === "failed");
+
+      const parts: string[] = [];
+      parts.push(
+        skills.length
+          ? `I've learned ${skills.length} skill${skills.length > 1 ? "s" : ""}: ${skills.map((c) => c.title).join(", ")}.`
+          : "I haven't learned any new skills yet.",
+      );
+      for (const p of pending) {
+        parts.push(`"${p.title}" is ready and needs your OK. It ${lowerFirst(p.description)} It will only access ${p.allowedDomains.join(", ")}. (approve with id ${p.id})`);
+      }
+      for (const j of learning) parts.push(`Still learning "${j.request}": ${j.message}.`);
+      for (const j of failed.slice(-2)) parts.push(`Couldn't learn "${j.request}": ${j.message}`);
+      return text(parts.join(" "), { skills, pending, learning, failed });
     },
   );
 

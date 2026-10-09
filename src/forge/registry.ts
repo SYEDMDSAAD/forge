@@ -36,6 +36,10 @@ export class Registry extends EventEmitter<RegistryEvents> {
     return [...this.caps.values()].filter((c) => c.status === "active");
   }
 
+  pending(): Capability[] {
+    return [...this.caps.values()].filter((c) => c.status === "pending");
+  }
+
   get(id: string): Capability | undefined {
     return this.caps.get(id);
   }
