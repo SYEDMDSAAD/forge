@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import {
   CallToolResultSchema,
   ElicitRequestSchema,
+  LoggingMessageNotificationSchema,
   ToolListChangedNotificationSchema,
   type CallToolResult,
   type ElicitResult,
@@ -140,6 +141,7 @@ function buildStep(text: string, kind: "" | "ok" | "bad" | "wait" = "") {
 }
 
 function buildEnd(ok: boolean, text: string) {
+  building = false;
   buildStep(text, ok ? "ok" : "bad");
   $("spinner").className = `spinner ${ok ? "done" : "fail"}`;
 }
@@ -180,6 +182,16 @@ async function refresh(freshName?: string) {
 }
 
 client.setNotificationHandler(ToolListChangedNotificationSchema, () => void refresh());
+
+// Every build step arrives as a log message. (Task status is only sampled once
+// a second, so fast steps like "Wrote … attempt 2" would be missed.)
+let building = false;
+const STEP_KIND: Record<string, "" | "ok" | "bad"> = { repair: "bad", ready: "ok" };
+client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
+  const d = n.params.data as { stage?: string; message?: string } | undefined;
+  if (!building || n.params.logger !== "forge" || !d?.message) return;
+  buildStep(d.message, STEP_KIND[d.stage ?? ""] ?? "");
+});
 
 // ---------- routing ----------
 // Stand-in for the assistant's own reasoning (Alexa+ or an LLM does this in
@@ -245,13 +257,13 @@ async function useSkill(skill: Skill, utterance: string) {
 async function learn(utterance: string): Promise<boolean> {
   say("I can't do that yet. Give me a minute — I'll learn how.");
   buildBegin(utterance);
+  building = true;
   let result: CallToolResult | undefined;
   const stream = client.experimental.tasks.callToolStream({ name: "forge_capability", arguments: { request: utterance } }, CallToolResultSchema, {
     timeout: 10 * 60_000,
   });
   for await (const msg of stream) {
     if (msg.type === "taskCreated") buildStep(`Task ${msg.task.taskId.slice(0, 8)} started`);
-    else if (msg.type === "taskStatus" && msg.task.statusMessage && msg.task.status === "working") buildStep(msg.task.statusMessage);
     else if (msg.type === "result") result = msg.result as CallToolResult;
     else if (msg.type === "error") {
       buildEnd(false, msg.error.message);

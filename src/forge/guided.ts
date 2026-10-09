@@ -231,7 +231,7 @@ ${evidence}`;
     if (syntax) problems.push(`syntax error at ${syntax}`);
     let failure: string;
     if (problems.length) {
-      onEvent({ stage: "repair", message: `Static check failed: ${problems[0]}` });
+      onEvent({ stage: "repair", message: `Static check failed: ${problems[0].split("\n")[0].replace(/:$/, "")}` });
       failure = `It was rejected before running:\n- ${problems.join("\n- ")}`;
     } else {
       onEvent({ stage: "test", message: "Running a live test in the sandbox" });

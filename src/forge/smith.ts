@@ -247,7 +247,7 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
           if (syntax) problems.push(`syntax error at ${syntax}`);
         }
         if (problems.length) {
-          onEvent({ stage: "repair", message: `Static check failed: ${problems[0]}` });
+          onEvent({ stage: "repair", message: `Static check failed: ${problems[0].split("\n")[0].replace(/:$/, "")}` });
           results.push({ type: "tool_result", tool_use_id: call.id, content: `Rejected before running:\n- ${problems.join("\n- ")}`, is_error: true });
         } else {
           onEvent({ stage: "test", message: `Running ${spec.tests.length} live test${spec.tests.length > 1 ? "s" : ""} in the sandbox` });
