@@ -1,9 +1,8 @@
 {
   "name": "forge-mcp",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx scripts/e2e-tasks.ts && tsx scripts/e2e-hotplug.ts",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
@@ -13,7 +12,7 @@
     "predev": "npm run build:web"
   },
   "keywords": [],
-  "author": "",
+  "author": "Syed Mohammad Saad",
   "license": "MIT",
   "description": "Forge: an Alexa+ MCP server that builds its own new capabilities at runtime",
   "dependencies": {
