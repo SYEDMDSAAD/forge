@@ -39,7 +39,7 @@ console.log("list_changed notifications:", listChanged);
 console.log("tools after:", tools.map((t) => t.name).join(", "));
 console.log("schema:", JSON.stringify(tools.find((t) => t.name === "get_current_temperature")?.inputSchema));
 const res = await client.callTool({ name: "get_current_temperature", arguments: { city: "Mumbai" } });
-console.log("call:", JSON.stringify(res.structuredContent));
+console.log("call:", JSON.stringify(res.structuredContent ?? res));
 console.log("resource:", (await client.listResources()).resources.map((r) => r.uri));
 await client.callTool({ name: "remove_capability", arguments: { name: "get_current_temperature" } });
 await new Promise((r) => setTimeout(r, 300));
