@@ -70,18 +70,28 @@ const text = (t: string, structured?: Record<string, unknown>): CallToolResult =
   ...(structured ? { structuredContent: structured } : {}),
 });
 
-/** Run a learned skill in a fresh sandbox runner. */
+/** Where a skill's answers come from: its declared sources, else the sites it may reach. */
+function sourcesOf(cap: Capability): string[] {
+  if (cap.spec.sources?.length) return cap.spec.sources;
+  return [...new Set(cap.spec.allowedDomains.map((d) => d.split(".").slice(-2).join(".")))];
+}
+
+/** Run a learned skill in a fresh sandbox runner; every answer names its source. */
 async function runSkill(cap: Capability, input: Record<string, unknown>): Promise<CallToolResult> {
   const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
   registry.recordUse(cap.id);
   if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
   const result = out.result as { speech: string; data?: unknown };
+  const sources = sourcesOf(cap);
+  const cited = sources.some((s) => result.speech.toLowerCase().includes(s.toLowerCase()))
+    ? result.speech
+    : `${result.speech} Source: ${sources.join(" and ")}.`;
   return {
     content: [
-      { type: "text", text: result.speech },
+      { type: "text", text: cited },
       ...(result.data !== undefined ? [{ type: "text" as const, text: JSON.stringify(result.data) }] : []),
     ],
-    structuredContent: { speech: result.speech, data: result.data ?? null },
+    structuredContent: { speech: cited, data: result.data ?? null, sources },
   };
 }
 
@@ -101,6 +111,8 @@ function summarize(cap: Capability) {
     description: cap.spec.description,
     status: cap.status,
     allowedDomains: cap.spec.allowedDomains,
+    sources: sourcesOf(cap),
+    crossChecked: cap.spec.tests.some((t) => t.reference),
     tests: cap.testReport.results.map((r) => ({ name: r.name, passed: r.passed, ms: r.durationMs })),
     attempts: cap.attempts,
     uses: cap.uses,

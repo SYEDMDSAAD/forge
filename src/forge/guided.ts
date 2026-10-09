@@ -196,7 +196,8 @@ function buildSpec(request: string, plan: Plan, src: Source, code: string): Tool
     inputSchema: { type: "object", properties, required: Object.keys(properties) },
     code,
     allowedDomains: src.domains,
-    tests: [{ name: "example", input, assert: speechAssert(request) }],
+    tests: [{ name: "example", input, assert: speechAssert(request), ...(src.reference ? { reference: src.reference } : {}) }],
+    sources: [src.name],
   };
 }
 

@@ -3,6 +3,15 @@ export interface ToolTest {
   input: Record<string, unknown>;
   /** JS expression over `result` and `input` that must be truthy. */
   assert: string;
+  /** Trusted cross-check: fetches the true values for `input` from the source; a number in the speech must match one. */
+  reference?: Reference;
+}
+
+export interface Reference {
+  /** ES module whose default export `async (input) => number[]` returns the values the source reports. */
+  code: string;
+  relTol?: number;
+  absTol?: number;
 }
 
 /** Everything the smith produces for one capability. */
@@ -15,6 +24,8 @@ export interface ToolSpec {
   code: string;
   allowedDomains: string[];
   tests: ToolTest[];
+  /** Human names of the data sources, cited in every answer (e.g. "Open-Meteo"). */
+  sources?: string[];
 }
 
 export interface TestResult {

@@ -76,6 +76,23 @@ const tidySpeech = (speech) =>
 
 const tidy = (result) => (result && typeof result.speech === "string" ? { ...result, speech: tidySpeech(result.speech) } : result);
 
+const numbersIn = (text) =>
+  (text.match(/-?\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => Number(n.replace(/,/g, ""))).filter(Number.isFinite);
+
+/** Compare the numbers in the answer with what the source itself reports. Returns a reason on mismatch. */
+async function crossCheck(speech, test) {
+  const said = numbersIn(speech);
+  if (!said.length) return null; // nothing numeric to verify
+  const reference = await loadTool(test.reference.code);
+  const expected = (await withTimeout(reference(test.input ?? {}), job.timeoutMs, "Reference check")).filter(Number.isFinite);
+  if (!expected.length) return null;
+  const { relTol = 0.03, absTol = 0 } = test.reference;
+  const close = (a, b) => Math.abs(a - b) <= Math.max(absTol, Math.abs(b) * relTol);
+  if (said.some((a) => expected.some((b) => close(a, b)))) return null;
+  const round = (n) => Math.round(n * 100) / 100;
+  return `Cross-check failed: the answer says ${said.join(", ")}, but the source reports ${expected.slice(0, 8).map(round).join(", ")} for this input. A value is computed or read wrongly.`;
+}
+
 async function main() {
   if (job.mode === "probe") {
     const res = await fetch(job.url, { method: job.method ?? "GET", headers: job.headers ?? {} });
@@ -106,14 +123,13 @@ async function main() {
           throw new Error("Tool must return an object with a non-empty `speech` string");
         }
         const check = new Function("result", "input", `"use strict"; return (${test.assert});`);
-        const passed = Boolean(check(result, test.input));
-        results.push({
-          name: test.name,
-          passed,
-          durationMs: Date.now() - started,
-          result,
-          ...(passed ? {} : { error: `Assertion was false: ${test.assert}` }),
-        });
+        let passed = Boolean(check(result, test.input));
+        let error = passed ? undefined : `Assertion was false: ${test.assert}`;
+        if (passed && test.reference) {
+          const mismatch = await crossCheck(result.speech, test);
+          if (mismatch) [passed, error] = [false, mismatch];
+        }
+        results.push({ name: test.name, passed, durationMs: Date.now() - started, result, ...(error ? { error } : {}) });
       } catch (e) {
         results.push({ name: test.name, passed: false, durationMs: Date.now() - started, error: errorText(e) });
       }

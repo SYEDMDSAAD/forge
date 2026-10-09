@@ -22,6 +22,8 @@ interface Skill {
   inputSchema: { properties?: Record<string, { type?: string; description?: string }>; required?: string[] };
   tests: { name: string; passed: boolean; ms: number }[];
   uses: number;
+  sources?: string[];
+  crossChecked?: boolean;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -158,7 +160,8 @@ client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult>
   for (const d of cap?.allowedDomains ?? []) domains.append(el("li", undefined, d));
   if (cap) {
     const passed = cap.tests.filter((t) => t.passed).length;
-    node.querySelector(".tests")!.textContent = `✓ Passed ${passed}/${cap.tests.length} live tests in the sandbox`;
+    const checked = cap.crossChecked && cap.sources?.length ? `, answer cross-checked against ${cap.sources.join(" and ")}` : "";
+    node.querySelector(".tests")!.textContent = `✓ Passed ${passed}/${cap.tests.length} live tests in the sandbox${checked}`;
   }
   addCard(node);
   speak(`I've learned a new skill: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);

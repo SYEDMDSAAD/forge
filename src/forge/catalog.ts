@@ -1,3 +1,5 @@
+import type { Reference } from "./types.js";
+
 // Keyless public APIs that Forge has checked by hand. The guided smith (for
 // small local models) builds skills only from these; the Claude smith gets
 // them as starting points and may go beyond them.
@@ -13,15 +15,90 @@ export interface Endpoint {
 
 export interface Source {
   id: string;
+  /** Cited in every answer the skill gives. */
+  name: string;
+  /** Trusted cross-check used in the live test (see runner.mjs); only for numeric sources. */
+  reference?: Reference;
   useFor: string;
   domains: string[];
   endpoints: Endpoint[];
   notes?: string;
 }
 
+// Reference checks. They can't know the input names a model chose, so they read
+// inputs by shape: the first string is a place, a number is an amount, 3-letter
+// strings are currency codes.
+const firstString = `const firstString = (input) => Object.values(input).find((v) => typeof v === "string" && v.trim());`;
+const geocode = `async function geocode(name) {
+  const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(name))).json();
+  return g.results?.[0];
+}`;
+
+const WEATHER_REFERENCE: Reference = {
+  code: `${firstString}
+${geocode}
+export default async function (input) {
+  const place = firstString(input) && (await geocode(firstString(input)));
+  if (!place) return [];
+  const w = await (await fetch(\`https://api.open-meteo.com/v1/forecast?latitude=\${place.latitude}&longitude=\${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3\`)).json();
+  const c = w.current ?? {}, d = w.daily ?? {};
+  return [c.temperature_2m, c.relative_humidity_2m, c.wind_speed_10m, c.precipitation, ...(d.temperature_2m_max ?? []), ...(d.temperature_2m_min ?? []), ...(d.precipitation_probability_max ?? [])];
+}`,
+  absTol: 1.5,
+  relTol: 0.05,
+};
+
+const AIR_QUALITY_REFERENCE: Reference = {
+  code: `${firstString}
+${geocode}
+export default async function (input) {
+  const place = firstString(input) && (await geocode(firstString(input)));
+  if (!place) return [];
+  const a = await (await fetch(\`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=\${place.latitude}&longitude=\${place.longitude}&current=us_aqi,pm2_5,pm10\`)).json();
+  return [a.current?.us_aqi, a.current?.pm2_5, a.current?.pm10];
+}`,
+  absTol: 3,
+  relTol: 0.05,
+};
+
+const ISS_REFERENCE: Reference = {
+  code: `export default async function () {
+  const s = await (await fetch("https://api.wheretheiss.at/v1/satellites/25544")).json();
+  return [s.altitude, s.velocity, s.velocity / 3.6, s.velocity * 0.621371, s.altitude * 0.621371];
+}`,
+  relTol: 0.03,
+};
+
+const CURRENCY_REFERENCE: Reference = {
+  code: `export default async function (input) {
+  const values = Object.values(input);
+  const amount = Number(values.find((v) => typeof v === "number" || /^\\d+(\\.\\d+)?$/.test(String(v))) ?? 1);
+  const codes = values.filter((v) => typeof v === "string" && /^[a-z]{3}$/i.test(v.trim())).map((v) => v.trim().toUpperCase());
+  if (codes.length < 2) return [];
+  const r = await (await fetch(\`https://api.frankfurter.dev/v1/latest?base=\${codes[0]}&symbols=\${codes[1]}\`)).json();
+  const rate = r.rates?.[codes[1]];
+  return rate ? [amount * rate, rate] : [];
+}`,
+  relTol: 0.02,
+};
+
+const CRYPTO_REFERENCE: Reference = {
+  code: `export default async function (input) {
+  const strings = Object.values(input).filter((v) => typeof v === "string").map((v) => v.trim().toLowerCase());
+  const coin = strings.find((v) => !/^[a-z]{3}$/.test(v));
+  const currency = strings.find((v) => /^[a-z]{3}$/.test(v)) ?? "inr";
+  if (!coin) return [];
+  const p = await (await fetch(\`https://api.coingecko.com/api/v3/simple/price?ids=\${encodeURIComponent(coin)}&vs_currencies=\${currency}&include_24hr_change=true\`)).json();
+  return Object.values(p[coin] ?? {});
+}`,
+  relTol: 0.03,
+};
+
 export const CATALOG: Source[] = [
   {
     id: "weather",
+    reference: WEATHER_REFERENCE,
+    name: "Open-Meteo",
     useFor: "current weather, temperature, rain chance, wind, multi-day forecast, sunrise/sunset for a city",
     domains: ["geocoding-api.open-meteo.com", "api.open-meteo.com"],
     endpoints: [
@@ -40,6 +117,8 @@ export const CATALOG: Source[] = [
   },
   {
     id: "air_quality",
+    reference: AIR_QUALITY_REFERENCE,
+    name: "Open-Meteo",
     useFor: "air quality index (AQI), pollution, PM2.5, PM10 for a city",
     domains: ["geocoding-api.open-meteo.com", "air-quality-api.open-meteo.com"],
     endpoints: [
@@ -58,6 +137,8 @@ export const CATALOG: Source[] = [
   },
   {
     id: "iss",
+    reference: ISS_REFERENCE,
+    name: "Where the ISS at and OpenStreetMap",
     useFor: "where the International Space Station is right now, its speed and altitude, which country it is over",
     domains: ["api.wheretheiss.at", "nominatim.openstreetmap.org"],
     endpoints: [
@@ -76,6 +157,8 @@ export const CATALOG: Source[] = [
   },
   {
     id: "currency",
+    reference: CURRENCY_REFERENCE,
+    name: "the European Central Bank via Frankfurter",
     useFor: "convert money between currencies, exchange rates (USD, INR, EUR, GBP, JPY...)",
     domains: ["api.frankfurter.dev"],
     endpoints: [
@@ -89,6 +172,8 @@ export const CATALOG: Source[] = [
   },
   {
     id: "crypto",
+    reference: CRYPTO_REFERENCE,
+    name: "CoinGecko",
     useFor: "cryptocurrency prices (bitcoin, ethereum, solana, dogecoin) and 24h change",
     domains: ["api.coingecko.com"],
     endpoints: [
@@ -102,6 +187,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "wikipedia",
+    name: "Wikipedia",
     useFor: "who/what is something, short facts or a summary about a person, place, thing or topic",
     domains: ["en.wikipedia.org"],
     endpoints: [
@@ -120,6 +206,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "hacker_news",
+    name: "Hacker News",
     useFor: "top tech news stories, what's trending on Hacker News",
     domains: ["hacker-news.firebaseio.com"],
     endpoints: [
@@ -138,6 +225,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "dictionary",
+    name: "the Free Dictionary",
     useFor: "meaning or definition of an English word",
     domains: ["api.dictionaryapi.dev"],
     endpoints: [
@@ -150,6 +238,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "launches",
+    name: "The Space Devs",
     useFor: "upcoming rocket launches, next space launch",
     domains: ["ll.thespacedevs.com"],
     endpoints: [
@@ -163,6 +252,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "earthquakes",
+    name: "the US Geological Survey",
     useFor: "recent earthquakes around the world",
     domains: ["earthquake.usgs.gov"],
     endpoints: [
@@ -175,6 +265,7 @@ export const CATALOG: Source[] = [
   },
   {
     id: "holidays",
+    name: "Nager.Date",
     useFor: "upcoming public holidays in a country (not available for India)",
     domains: ["date.nager.at"],
     endpoints: [

@@ -64,3 +64,21 @@ Entries recorded while building Forge. Severity: Blocker / High / Medium / Low.
 - **Severity:** Low
 - **Workaround:** Based the fix on `v1.x`.
 - **Suggestion:** A short "Tasks support by SDK version" note in the README and the Tasks docs.
+
+## 8. Alexa+ docs disagree on the MCP protocol version
+- **Task:** Confirm which MCP protocol version the Alexa+ client speaks, since the hackathon requires a server on spec 2025-11-25.
+- **Steps:** Read the MCP Toolkit overview, then "Alexa+ MCP Client and App Lifecycle" (developer.amazon.com/en-US/docs/alexaplus/add-ons/mcp-toolkit-client-lifecycle.html).
+- **Expected:** One version, matching the hackathon requirement.
+- **Actual:** The overview says Alexa+ supports 2025-11-25, but the lifecycle page's sample `initialize` request from "Alexa+ MCP Client" uses `protocolVersion: "2025-03-26"`. If the real client sends 2025-03-26, version negotiation would rule out 2025-11-25 features (Tasks) on that connection.
+- **Severity:** Medium
+- **Workaround:** Forge doesn't depend on Tasks with Alexa+: plain calls get the fast "learning" answer and voice approval, so it works on either version.
+- **Suggestion:** Update the sample to the version actually sent, and state which spec features the client uses on each version.
+
+## 9. Broken "Supported Capabilities" link and missing limits in the Alexa+ add-on docs
+- **Task:** Find the Alexa+ client's supported MCP features and limits (timeouts, payload sizes, tool counts).
+- **Steps:** Alexa+ add-ons docs home → "Supported Capabilities" under MCP Toolkit.
+- **Expected:** A capability list with limits.
+- **Actual:** The link on the docs home points to `.add-ons/mcp-toolkit-supported-capabilities.html` (stray leading dot) and doesn't resolve as written. The page itself (`/en-US/docs/alexaplus/add-ons/mcp-toolkit-supported-capabilities.html`) only covers authentication and account linking. No page we found lists tool-call timeouts, retries, payload or tool-count limits.
+- **Severity:** Low
+- **Workaround:** Designed for the strictest reading (sub-500 ms answers, fixed tool list).
+- **Suggestion:** Fix the link and publish a limits table next to the capability list.

@@ -1,12 +1,12 @@
 # Forge — the assistant that learns
 
-Every voice assistant has a long tail of requests it can't handle: *"Is my train late?"*, *"Read me the new posts on my college notice board"*, *"What's the air quality where I am?"* Today the answer is "Sorry, I can't help with that."
+AI assistants like Alexa+ are good at what they're connected to, but every connection (an "expert", an add-on) has to be built, certified and approved by a partner. The long tail never gets one: niche public datasets and open APIs (space station position, earthquake feeds, a dictionary, Hacker News) that no partner will ever wrap. And when an assistant answers from its own knowledge instead, it can be confidently wrong, with no way to see where the answer came from.
 
-Forge is an MCP server for Alexa+ that changes the answer to:
+Forge is an MCP server for Alexa+ that lets the assistant **build those connections itself, with answers you can verify**:
 
 > **"I can't do that yet. Give me a minute — I'll learn how."**
 
-When no tool fits a request, Forge has Claude write a new tool, runs it in a locked-down sandbox against the real internet until its tests pass, asks the user's permission, and installs it. The next time, *"Is my train late?"* just works.
+When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox, **cross-checks the numbers it says against the source itself**, asks the user's permission (showing exactly which sites it will reach), and installs it. Every answer names its source: *"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."* Next time, it just works.
 
 ```
 user request ─▶ forge_capability ─▶ Smith (Claude)
@@ -103,6 +103,7 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 - **Per-skill domain allowlist**: tool code never sees the real `fetch`; requests to hosts outside the skill's declared domains throw.
 - **Time limits** per call and per test run.
 - **Human consent** before any skill is installed, showing exactly which sites it will access.
+- **Answers you can check**: every answer names its source, and for numeric sources the live test cross-checks the numbers in the answer against the source itself (a hand-written reference check per source). This catches skills that read or compute a value wrongly, e.g. a currency conversion applied twice.
 - **No secrets**: skills only use keyless public sources. Requests that need a login, payment or private data are declined.
 
 `FORGE_SANDBOX=process` runs code in a separate Node process instead of Docker. It is a development fallback only, not an isolation boundary.
@@ -137,6 +138,7 @@ npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> rem
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)
+npx tsx scripts/crosscheck-demo.ts  # the cross-check rejecting a skill whose number is wrong
 ```
 
 ## Project layout
@@ -164,8 +166,9 @@ FRICTION_LOG.md       issues hit while building on the Amazon and MCP tooling
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
 - Working and tested: the MCP server, sandbox, runtime tool registration, tasks, elicitation, the Alexa-compatible flow and the demo client.
-- Working on a local model: the guided smith (12/12 on the benchmark in one run).
+- Working on a local model: the guided smith (see `scripts/forge-bench.ts`).
 - In progress: the agent smith on Claude, deployment on AWS, and an Alexa+ add-on.
+- Known gap for a real Alexa+ add-on: certification. Alexa+ policy rejects open-ended text inputs and tools unrelated to an add-on's stated purpose, and skills generated after certification would need their own review. A realistic path is Forge as a developer tool: skills are learned, reviewed by a person, then shipped as ordinary certified add-ons.
 
 ## License
 

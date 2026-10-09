@@ -11,6 +11,7 @@ const WEATHER: ToolSpec = {
   description: "Gets the current temperature and conditions for a city by name. Use when the user asks about the weather right now somewhere.",
   inputSchema: { type: "object", properties: { city: { type: "string", description: "City name, e.g. Pune" } }, required: ["city"] },
   allowedDomains: ["geocoding-api.open-meteo.com", "api.open-meteo.com"],
+  sources: ["Open-Meteo"],
   code: `export default async function run({ city }) {
   const geo = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(city))).json();
   if (!geo.results?.length) return { speech: \`I couldn't find a place called \${city}.\` };
