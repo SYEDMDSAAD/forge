@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { ToolSpec } from "./types.js";
 
 const NAME = /^[a-z][a-z0-9_]{2,47}$/;
@@ -38,4 +42,28 @@ export function validateSpec(spec: ToolSpec): string[] {
 
   if (spec.tests.length < 1 || spec.tests.length > 5) problems.push("provide 1-5 tests");
   return problems;
+}
+
+/**
+ * Parse the module without running it. Returns null when it parses, else the
+ * error with the offending line and a caret, which a model can act on (the
+ * sandbox's own SyntaxError has no position).
+ */
+export async function syntaxError(code: string): Promise<string | null> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "forge-check-"));
+  const file = path.join(dir, "tool.mjs");
+  writeFileSync(file, code);
+  try {
+    return await new Promise((resolve) => {
+      execFile(process.execPath, ["--check", file], { timeout: 10000 }, (err, _out, stderr) => {
+        if (!err) return resolve(null);
+        const lines = stderr.split("\n");
+        const at = lines.findIndex((l) => l.includes(file));
+        const where = at === -1 ? "" : `line ${lines[at].split(":").pop()}:\n${lines.slice(at + 1, at + 3).join("\n")}\n`;
+        resolve(`${where}${lines.find((l) => /^\w*Error:/.test(l)) ?? "SyntaxError"}`);
+      });
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

@@ -59,7 +59,7 @@ npm start              # MCP server at http://localhost:8787/mcp, demo client at
 |---|---|---|
 | `bedrock` | Claude on Amazon Bedrock (`AWS_REGION`, standard AWS credentials) | Deployment |
 | `anthropic` | Claude API (`ANTHROPIC_API_KEY`) | Development |
-| `ollama` | A local model through Ollama's Anthropic-compatible API (`FORGE_MODEL`, default `qwen2.5:3b`) | Free plumbing tests; small models can't build skills reliably |
+| `ollama` | A local model through Ollama (`FORGE_MODEL`, e.g. `qwen2.5-coder:7b`), using the guided smith | Free development on a laptop |
 | `mock` | Replays one known-good build (a weather skill); its tests still run for real | UI work and demo fallback, no model needed |
 
 Try it without any model:
@@ -78,6 +78,15 @@ npx tsx scripts/forge-cli.ts "Where is the ISS right now?"
 ### Connecting an MCP client
 
 Point any Streamable HTTP MCP client at `http://localhost:8787/mcp`. To reach it from Alexa+ during development, expose it through a tunnel (for example `cloudflared tunnel --url http://localhost:8787`).
+
+### Two smiths
+
+- **Agent** (default with Claude): an open-ended tool-use loop. Claude probes any public API, writes the skill and its tests, and repairs it from real failures.
+- **Guided** (default with Ollama, `FORGE_SMITH=guided`): for small local models. Short steps, each constrained to a JSON schema: pick a source from the verified catalog (`src/forge/catalog.ts`), look at real responses, fill in a code template, then repair or start over based on the exact failure (located syntax errors, plain-language reasons why the answer was rejected).
+
+Every skill must pass a live test on an example input whose answer is a real spoken sentence: no `undefined`/`NaN`, no apology, not a question, not an echo of the user's question.
+
+`scripts/forge-bench.ts` builds 12 varied requests from scratch (weather, rain, air quality, ISS, currency, crypto, Wikipedia, Hacker News, dictionary, rocket launches, earthquakes, and one that must be refused). With `qwen2.5-coder:7b` on a laptop (RTX 3050, 4 GB) the guided smith got 12/12 in one run, about 55 s per skill.
 
 ## The demo client
 
@@ -105,6 +114,8 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 | `PORT` | `8787` | HTTP port |
 | `FORGE_PROVIDER` | `anthropic` | `anthropic`, `bedrock`, `ollama` or `mock` |
 | `FORGE_MODEL` | per provider | Model id (`claude-opus-5-5`, `anthropic.claude-opus-5-5`, `qwen2.5:3b`) |
+| `FORGE_SMITH` | `agent` (`guided` with Ollama) | Which smith builds skills |
+| `OLLAMA_CONTEXT` | `8192` | Context window requested from Ollama |
 | `AWS_REGION` | `us-east-1` | Bedrock region |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
 | `FORGE_SANDBOX` | `docker` | `docker` or `process` (dev only) |
@@ -125,6 +136,7 @@ npx tsx scripts/e2e-tasks.ts      # task flow + Alexa-style flow against the moc
 npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> remove
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked
 npx tsx scripts/sandbox-latency.ts
+npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)
 ```
 
 ## Project layout
@@ -134,6 +146,8 @@ src/
   index.ts            HTTP server: Streamable HTTP sessions, demo client, /health
   server.ts           MCP server: tools, task, elicitation, resources
   forge/smith.ts      the agent loop that researches, writes, tests and repairs a skill
+  forge/guided.ts     the guided smith for small local models
+  forge/catalog.ts    verified keyless public APIs
   forge/validate.ts   static checks on generated code
   forge/registry.ts   persisted skills, shared by all sessions
   forge/mock.ts       replay provider
@@ -150,7 +164,8 @@ FRICTION_LOG.md       issues hit while building on the Amazon and MCP tooling
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
 - Working and tested: the MCP server, sandbox, runtime tool registration, tasks, elicitation, the Alexa-compatible flow and the demo client.
-- In progress: tuning the Smith on Claude across varied requests, deployment on AWS, and an Alexa+ add-on.
+- Working on a local model: the guided smith (12/12 on the benchmark in one run).
+- In progress: the agent smith on Claude, deployment on AWS, and an Alexa+ add-on.
 
 ## License
 

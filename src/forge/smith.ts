@@ -3,7 +3,7 @@ import { config } from "../config.js";
 import { createClient, fallbackParams, modelParams } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
 import type { ForgeEvent, TestReport, ToolSpec } from "./types.js";
-import { validateSpec } from "./validate.js";
+import { syntaxError, validateSpec } from "./validate.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
 type ToolResult = Anthropic.Beta.BetaToolResultBlockParam;
@@ -174,6 +174,7 @@ function describeReport(report: TestReport): string {
  */
 export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => void = () => {}): Promise<SmithResult> {
   if (config.provider === "mock") return (await import("./mock.js")).mockForge(request, onEvent);
+  if (config.smith === "guided") return (await import("./guided.js")).guidedForge(request, onEvent);
   const client = createClient();
   const tools: Anthropic.Beta.BetaToolUnion[] = [PROBE_TOOL, SUBMIT_TOOL, GIVE_UP_TOOL];
   if (config.provider === "anthropic") {
@@ -241,6 +242,10 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
         onEvent({ stage: "submit", message: `Wrote ${spec.name} (attempt ${submissions})` });
 
         const problems = validateSpec(spec);
+        if (!problems.length) {
+          const syntax = await syntaxError(spec.code);
+          if (syntax) problems.push(`syntax error at ${syntax}`);
+        }
         if (problems.length) {
           onEvent({ stage: "repair", message: `Static check failed: ${problems[0]}` });
           results.push({ type: "tool_result", tool_use_id: call.id, content: `Rejected before running:\n- ${problems.join("\n- ")}`, is_error: true });

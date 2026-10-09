@@ -19,6 +19,11 @@ export const config = {
       : (process.env.FORGE_MODEL ?? { anthropic: "claude-opus-5-5", bedrock: "anthropic.claude-opus-5-5", ollama: "qwen2.5:3b" }[provider]),
   // Ollama serves an Anthropic-compatible Messages API; used as a free local stand-in during development.
   ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
+  // Ollama defaults to a 4k context, too small for Forge's prompts.
+  ollamaContext: Number(process.env.OLLAMA_CONTEXT ?? 8192),
+  // "agent": open-ended tool-use loop (Claude). "guided": short JSON-schema steps
+  // over the verified source catalog, for small local models.
+  smith: (process.env.FORGE_SMITH ?? (provider === "ollama" ? "guided" : "agent")) as "agent" | "guided",
   awsRegion: process.env.AWS_REGION ?? "us-east-1",
   sandbox: (process.env.FORGE_SANDBOX ?? "docker") as SandboxKind,
   // Sandbox runners kept pre-started (each still runs one job only).
