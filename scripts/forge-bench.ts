@@ -27,8 +27,11 @@ let ok = 0;
 for (const c of cases) {
   const t0 = Date.now();
   let line: string;
+  let lastProblem = "";
   try {
-    const { spec, report, attempts } = await forgeTool(c.request);
+    const { spec, report, attempts } = await forgeTool(c.request, (e) => {
+      if (e.stage === "repair") lastProblem = e.message;
+    });
     const speech = (report.results[0]?.result as { speech?: string })?.speech;
     const good = c.expect === "build";
     if (good) ok++;
@@ -37,7 +40,7 @@ for (const c of cases) {
     if (!(e instanceof ForgeFailed)) throw e;
     const good = c.expect === "refuse";
     if (good) ok++;
-    line = `${good ? "PASS" : "FAIL"} refused: ${e.message}`;
+    line = `${good ? "PASS" : "FAIL"} refused: ${e.message}${lastProblem ? ` (last problem: ${lastProblem})` : ""}`;
   }
   console.log(`[${((Date.now() - t0) / 1000).toFixed(0).padStart(4)}s] ${c.request}\n        ${line}`);
 }
