@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Request, Response } from "express";
+import express, { type Request, type Response } from "express";
+import { fileURLToPath } from "node:url";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -47,11 +48,14 @@ const bySession = async (req: Request, res: Response) => {
 app.get("/mcp", bySession);
 app.delete("/mcp", bySession);
 
+// Demo client (web/app.ts, built with `npm run build:web`).
+app.use(express.static(fileURLToPath(new URL("../web/public", import.meta.url))));
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, provider: config.provider, model: config.model, sandbox: config.sandbox, skills: registry.active().length, sessions: transports.size });
 });
 
 warmSandbox();
 app.listen(config.port, () => {
-  console.log(`Forge MCP server on http://localhost:${config.port}/mcp (${config.provider}/${config.model}, sandbox=${config.sandbox})`);
+  console.log(`Forge MCP server on http://localhost:${config.port}/mcp, demo client on http://localhost:${config.port}/ (${config.provider}/${config.model}, sandbox=${config.sandbox})`);
 });

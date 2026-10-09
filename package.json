@@ -7,7 +7,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:web": "esbuild web/app.ts --bundle --format=esm --platform=browser --minify --sourcemap --outfile=web/public/app.js",
+    "prestart": "npm run build:web",
+    "predev": "npm run build:web"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },

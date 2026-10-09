@@ -14,8 +14,9 @@ export const config = {
   provider,
   // Bedrock model IDs take an `anthropic.` prefix.
   model:
-    process.env.FORGE_MODEL ??
-    { anthropic: "claude-opus-5-5", bedrock: "anthropic.claude-opus-5-5", ollama: "qwen2.5:3b", mock: "mock" }[provider],
+    provider === "mock"
+      ? "replay"
+      : (process.env.FORGE_MODEL ?? { anthropic: "claude-opus-5-5", bedrock: "anthropic.claude-opus-5-5", ollama: "qwen2.5:3b" }[provider]),
   // Ollama serves an Anthropic-compatible Messages API; used as a free local stand-in during development.
   ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
   awsRegion: process.env.AWS_REGION ?? "us-east-1",

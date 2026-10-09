@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forge</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark"></span>Forge <small>the assistant that learns</small></div>
+    <div class="conn" id="conn">connecting…</div>
+  </header>
+
+  <main class="layout">
+    <section class="assistant">
+      <div class="ring" id="ring" aria-hidden="true"></div>
+      <ol class="chat" id="chat" aria-live="polite"></ol>
+      <form class="ask" id="ask">
+        <button type="button" class="mic" id="mic" title="Speak (Chrome)" aria-label="Speak">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+        </button>
+        <input id="say" autocomplete="off" placeholder="Ask anything… e.g. What's the weather in Pune right now?" />
+        <button type="submit" class="send">Ask</button>
+      </form>
+      <label class="voice"><input type="checkbox" id="speak" checked /> Speak answers</label>
+    </section>
+
+    <aside class="forge">
+      <h2>Forge</h2>
+      <div class="build" id="build" hidden>
+        <div class="build-head"><span class="spinner" id="spinner"></span><span id="build-title">Learning</span></div>
+        <ol class="steps" id="steps"></ol>
+      </div>
+      <h3>Learned skills <span class="count" id="count">0</span></h3>
+      <ul class="skills" id="skills"><li class="empty">Nothing learned yet. Ask for something new.</li></ul>
+      <p class="proto">MCP <span id="proto">–</span> · Streamable HTTP · <span id="mode">–</span></p>
+    </aside>
+  </main>
+
+  <template id="consent-tpl">
+    <div class="card consent">
+      <div class="card-kicker">New skill ready</div>
+      <div class="card-title"></div>
+      <p class="card-body"></p>
+      <ul class="domains"></ul>
+      <div class="tests"></div>
+      <div class="actions"><button class="yes">Install</button><button class="no">Not now</button></div>
+    </div>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

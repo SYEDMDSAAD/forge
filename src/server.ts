@@ -170,6 +170,8 @@ export function createServer(): McpServer {
     const passed = cap.testReport.results.filter((r) => r.passed).length;
     const res = await elicit({
       mode: "form",
+      // Structured details so a client can render a consent card instead of plain text.
+      _meta: { "forge/capability": summarize(cap) },
       message:
         `I learned a new skill: "${cap.spec.title}". ${cap.spec.description}\n` +
         `It passed ${passed}/${cap.testReport.results.length} live tests and will only access: ${cap.spec.allowedDomains.join(", ")}.\n` +
