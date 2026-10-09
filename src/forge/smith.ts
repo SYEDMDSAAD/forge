@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
-import { createClient, fallbackParams } from "../llm.js";
+import { createClient, fallbackParams, modelParams } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
 import type { ForgeEvent, TestReport, ToolSpec } from "./types.js";
 import { validateSpec } from "./validate.js";
@@ -26,6 +26,15 @@ The tool is a single ES module, run in a locked-down sandbox:
 - Each call has a ${config.toolTimeoutMs / 1000}s time limit. No API keys or logins exist; use keyless public sources (open APIs, public JSON/RSS/HTML pages).
 - \`speech\` is spoken aloud: natural, specific, no markdown, no URLs, round numbers sensibly. Handle "nothing found" gracefully with a helpful sentence instead of throwing.
 - Make it general and reusable: take parameters (city, station, query, ...) rather than hard-coding the user's example, but use the user's example as the default in tests.
+
+## Known keyless sources (verified starting points, not an exhaustive list)
+- Weather / air quality: api.open-meteo.com, geocoding-api.open-meteo.com (city -> lat/lon), air-quality-api.open-meteo.com
+- Places / geocoding: nominatim.openstreetmap.org, overpass-api.de
+- Space: api.wheretheiss.at, ll.thespacedevs.com
+- Knowledge: en.wikipedia.org/api/rest_v1, api.dictionaryapi.dev
+- Money / markets: api.frankfurter.app (FX), api.coingecko.com (crypto)
+- News / feeds: hacker-news.firebaseio.com, any public RSS feed
+If a source returns 401/403 or asks for a key, switch to a keyless one; don't give up because the first source needed a key.
 
 ## Process
 1. If you are unsure of an endpoint or response shape, call http_probe to look at real responses before writing code. Prefer stable, documented sources.
@@ -109,15 +118,33 @@ interface SubmitInput {
   tests: { name: string; input_json: string; assert: string }[];
 }
 
-function parseSubmission(input: SubmitInput): ToolSpec {
+/** Hostname from whatever the model wrote: "https://api.x.com/v1" -> "api.x.com". */
+function toHost(d: string): string {
+  const t = d.trim().toLowerCase();
+  try {
+    return new URL(t.includes("://") ? t : `https://${t}`).hostname;
+  } catch {
+    return t;
+  }
+}
+
+/** Parse a submit_tool call, forgiving harmless shape slips. Throws with a message the model can act on. */
+export function parseSubmission(input: Partial<SubmitInput>): ToolSpec {
+  const missing = SUBMIT_TOOL.input_schema.required!.filter((k) => input[k as keyof SubmitInput] === undefined);
+  if (missing.length) throw new Error(`missing fields: ${missing.join(", ")}`);
+  let inputSchema = JSON.parse(input.input_schema_json!);
+  // A bare property map ({ city: {...} }) is unambiguous; wrap it.
+  if (inputSchema && typeof inputSchema === "object" && inputSchema.type === undefined && inputSchema.properties === undefined) {
+    inputSchema = { type: "object", properties: inputSchema };
+  }
   return {
-    name: input.name,
-    title: input.title,
-    description: input.description,
-    inputSchema: JSON.parse(input.input_schema_json),
-    code: input.code,
-    allowedDomains: input.allowed_domains.map((d) => d.trim().toLowerCase()),
-    tests: input.tests.map((t) => ({ name: t.name, input: JSON.parse(t.input_json), assert: t.assert })),
+    name: input.name!,
+    title: input.title!,
+    description: input.description!,
+    inputSchema,
+    code: input.code!,
+    allowedDomains: [...new Set(input.allowed_domains!.map(toHost))],
+    tests: input.tests!.map((t, i) => ({ name: t.name || `test_${i + 1}`, input: JSON.parse(t.input_json), assert: t.assert })),
   };
 }
 
@@ -160,9 +187,7 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
     const response = await client.beta.messages
       .stream({
         model: config.model,
-        max_tokens: 64000,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high" },
+        ...modelParams(),
         system: SYSTEM,
         tools,
         messages,
@@ -172,6 +197,7 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
 
     if (response.stop_reason === "refusal") throw new ForgeFailed("I can't build that one.");
     messages.push({ role: "assistant", content: response.content });
+    if (config.debug) console.error("[debug] assistant:", JSON.stringify(response.content).slice(0, 3000));
     if (response.stop_reason === "pause_turn") continue;
 
     const calls = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
@@ -206,9 +232,9 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
         submissions++;
         let spec: ToolSpec;
         try {
-          spec = parseSubmission(call.input as SubmitInput);
+          spec = parseSubmission(call.input as Partial<SubmitInput>);
         } catch (e) {
-          results.push({ type: "tool_result", tool_use_id: call.id, content: `Invalid JSON in input_schema_json or input_json: ${e}`, is_error: true });
+          results.push({ type: "tool_result", tool_use_id: call.id, content: `Invalid submission (${(e as Error).message}). Resend submit_tool with every required field; input_schema_json and input_json must be JSON strings.`, is_error: true });
           continue;
         }
         onEvent({ stage: "submit", message: `Wrote ${spec.name} (attempt ${submissions})` });
@@ -240,6 +266,7 @@ export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => voi
     }
 
     if (done) return done;
+    if (config.debug) console.error("[debug] results:", JSON.stringify(results).slice(0, 3000));
     messages.push({ role: "user", content: results });
   }
 
