@@ -173,6 +173,7 @@ function describeReport(report: TestReport): string {
  * iterates against real sandboxed test runs until the tests pass.
  */
 export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => void = () => {}): Promise<SmithResult> {
+  if (config.provider === "mock") return (await import("./mock.js")).mockForge(request, onEvent);
   const client = createClient();
   const tools: Anthropic.Beta.BetaToolUnion[] = [PROBE_TOOL, SUBMIT_TOOL, GIVE_UP_TOOL];
   if (config.provider === "anthropic") {

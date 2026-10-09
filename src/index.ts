@@ -4,7 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
-import { createServer, registry } from "./server.js";
+import { createServer, markTaskCall, registry } from "./server.js";
 
 const app = createMcpExpressApp();
 const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -27,6 +27,9 @@ app.post("/mcp", async (req: Request, res: Response) => {
     };
     await createServer().connect(created);
     transport = created;
+  }
+  for (const msg of [req.body].flat()) {
+    if (sessionId && msg?.method === "tools/call" && msg.params?.task && msg.id !== undefined) markTaskCall(sessionId, msg.id);
   }
   await transport.handleRequest(req, res, req.body);
 });

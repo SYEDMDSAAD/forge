@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { McpServer, ResourceTemplate, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import { InMemoryTaskMessageQueue, InMemoryTaskStore } from "@modelcontextprotocol/sdk/experimental/tasks";
+import {
+  ElicitResultSchema,
+  type CallToolResult,
+  type ElicitRequestFormParams,
+  type ElicitResult,
+  type ServerNotification,
+  type ServerRequest,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import * as z from "zod/v4";
 import { ForgeFailed, forgeTool } from "./forge/smith.js";
@@ -11,6 +19,22 @@ import { runInSandbox } from "./sandbox/sandbox.js";
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 export const registry = new Registry();
+
+// Forging takes 30-120s, so forge_capability runs as an MCP task (spec 2025-11-25):
+// task-aware clients get a task id at once and poll its status; others get the
+// SDK's automatic polling and see an ordinary blocking call.
+const taskStore = new InMemoryTaskStore();
+const taskMessageQueue = new InMemoryTaskMessageQueue();
+const taskCalls = new Set<string>();
+
+/**
+ * index.ts records which tools/call requests the client sent task-augmented
+ * (`params.task`). Inside a task the consent prompt has to be queued for
+ * tasks/result; in a plain call it goes straight down the open response stream.
+ */
+export function markTaskCall(sessionId: string, requestId: string | number) {
+  taskCalls.add(`${sessionId}:${requestId}`);
+}
 
 const INSTRUCTIONS = `Forge lets this assistant learn new abilities while talking to the user.
 When the user asks for something none of your tools can do, and it could be done by reading public information on the internet, tell the user you'll learn it (e.g. "Give me a minute, I'll learn how") and call forge_capability with their request in their own words. When it returns, the new tool is installed: call it right away to answer the user.
@@ -48,7 +72,12 @@ function summarize(cap: Capability) {
 export function createServer(): McpServer {
   const mcp = new McpServer(
     { name: "forge", title: "Forge — the assistant that learns", version: "0.1.0" },
-    { capabilities: { logging: {}, tools: { listChanged: true } }, instructions: INSTRUCTIONS },
+    {
+      capabilities: { logging: {}, tools: { listChanged: true }, tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } } },
+      instructions: INSTRUCTIONS,
+      taskStore,
+      taskMessageQueue,
+    },
   );
   const forged = new Map<string, RegisteredTool>();
 
@@ -106,10 +135,11 @@ export function createServer(): McpServer {
   };
 
   /** Ask the human before a new capability goes live. Uses MCP elicitation when the client supports it. */
-  const askConsent = async (cap: Capability): Promise<"accept" | "decline" | "unsupported"> => {
+  type Elicit = (params: ElicitRequestFormParams) => Promise<ElicitResult>;
+  const askConsent = async (cap: Capability, elicit: Elicit): Promise<"accept" | "decline" | "unsupported"> => {
     if (!mcp.server.getClientCapabilities()?.elicitation) return "unsupported";
     const passed = cap.testReport.results.filter((r) => r.passed).length;
-    const res = await mcp.server.elicitInput({
+    const res = await elicit({
       mode: "form",
       message:
         `I learned a new skill: "${cap.spec.title}". ${cap.spec.description}\n` +
@@ -124,7 +154,48 @@ export function createServer(): McpServer {
     return res.action === "accept" && res.content?.install === true ? "accept" : "decline";
   };
 
-  mcp.registerTool(
+  /** Build, test, ask consent, install. Shared by the task and the plain-call paths. */
+  const forgeAndInstall = async (request: string, emit: (e: ForgeEvent) => void, elicit: Elicit): Promise<CallToolResult> => {
+    let built;
+    try {
+      built = await forgeTool(request, emit);
+    } catch (e) {
+      if (e instanceof ForgeFailed) return text(e.message, { status: "failed", reason: e.message });
+      throw e;
+    }
+
+    const cap: Capability = {
+      id: randomUUID().slice(0, 8),
+      status: "pending",
+      spec: built.spec,
+      request,
+      createdAt: new Date().toISOString(),
+      attempts: built.attempts,
+      testReport: built.report,
+      uses: 0,
+    };
+    registry.addPending(cap);
+
+    const consent = await askConsent(cap, elicit);
+    if (consent === "decline") {
+      registry.remove(cap.id);
+      return text("The user chose not to install the new skill. It has been discarded.", { status: "declined" });
+    }
+    if (consent === "unsupported") {
+      return text(
+        `Built "${cap.spec.title}" and it passed its tests, but it needs the user's OK before installing. ` +
+          `Tell the user what it does and that it will access ${cap.spec.allowedDomains.join(", ")}, ask if they want it, then call approve_capability with id "${cap.id}".`,
+        { status: "pending_approval", capability: summarize(cap) },
+      );
+    }
+    registry.activate(cap.id);
+    return text(`Installed the new tool "${cap.spec.name}". Call it now to answer the user's request.`, {
+      status: "installed",
+      capability: summarize(cap),
+    });
+  };
+
+  mcp.experimental.tasks.registerToolTask(
     "forge_capability",
     {
       title: "Learn a new skill",
@@ -134,46 +205,44 @@ export function createServer(): McpServer {
         request: z.string().min(5).describe("What the user wants, in their words, including any specifics (places, names, numbers)"),
       },
       annotations: { openWorldHint: true },
+      execution: { taskSupport: "optional" },
     },
-    async ({ request }, extra) => {
-      const emit = report(extra);
-      let built;
-      try {
-        built = await forgeTool(request, (e) => void emit(e));
-      } catch (e) {
-        if (e instanceof ForgeFailed) return text(e.message, { status: "failed", reason: e.message });
-        throw e;
-      }
+    {
+      async createTask({ request }, extra) {
+        const task = await extra.taskStore.createTask({ ttl: extra.taskRequestedTtl ?? 15 * 60_000, pollInterval: 1000 });
+        const key = `${extra.sessionId}:${extra.requestId}`;
+        const asTask = taskCalls.delete(key);
+        const progress = report(extra);
 
-      const cap: Capability = {
-        id: randomUUID().slice(0, 8),
-        status: "pending",
-        spec: built.spec,
-        request,
-        createdAt: new Date().toISOString(),
-        attempts: built.attempts,
-        testReport: built.report,
-        uses: 0,
-      };
-      registry.addPending(cap);
+        const emit = (e: ForgeEvent) => {
+          void progress(e);
+          void extra.taskStore.updateTaskStatus(task.taskId, "working", e.message).catch(() => {});
+        };
+        const elicit: Elicit = async (params) => {
+          if (!asTask) return mcp.server.elicitInput(params, { relatedRequestId: extra.requestId });
+          // Queued for delivery on the client's tasks/result call while the task shows input_required.
+          await extra.taskStore.updateTaskStatus(task.taskId, "input_required", "Waiting for the user's OK");
+          const res = await mcp.server.request({ method: "elicitation/create", params }, ElicitResultSchema, {
+            relatedTask: { taskId: task.taskId },
+          });
+          await extra.taskStore.updateTaskStatus(task.taskId, "working", "Installing").catch(() => {});
+          return res;
+        };
 
-      const consent = await askConsent(cap);
-      if (consent === "decline") {
-        registry.remove(cap.id);
-        return text("The user chose not to install the new skill. It has been discarded.", { status: "declined" });
-      }
-      if (consent === "unsupported") {
-        return text(
-          `Built "${cap.spec.title}" and it passed its tests, but it needs the user's OK before installing. ` +
-            `Tell the user what it does and that it will access ${cap.spec.allowedDomains.join(", ")}, ask if they want it, then call approve_capability with id "${cap.id}".`,
-          { status: "pending_approval", capability: summarize(cap) },
-        );
-      }
-      registry.activate(cap.id);
-      return text(`Installed the new tool "${cap.spec.name}". Call it now to answer the user's request.`, {
-        status: "installed",
-        capability: summarize(cap),
-      });
+        void (async () => {
+          try {
+            const result = await forgeAndInstall(request, emit, elicit);
+            await extra.taskStore.storeTaskResult(task.taskId, "completed", result);
+          } catch (e) {
+            await extra.taskStore
+              .storeTaskResult(task.taskId, "failed", { ...text(`Forge error: ${e instanceof Error ? e.message : e}`), isError: true })
+              .catch(() => {});
+          }
+        })();
+        return { task };
+      },
+      getTask: (_args, { taskId, taskStore }) => taskStore.getTask(taskId),
+      getTaskResult: (_args, { taskId, taskStore }) => taskStore.getTaskResult(taskId) as Promise<CallToolResult>,
     },
   );
 

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export type Provider = "anthropic" | "bedrock" | "ollama";
+export type Provider = "anthropic" | "bedrock" | "ollama" | "mock";
 export type SandboxKind = "docker" | "process";
 
 try {
@@ -15,7 +15,7 @@ export const config = {
   // Bedrock model IDs take an `anthropic.` prefix.
   model:
     process.env.FORGE_MODEL ??
-    { anthropic: "claude-opus-5-5", bedrock: "anthropic.claude-opus-5-5", ollama: "qwen2.5:3b" }[provider],
+    { anthropic: "claude-opus-5-5", bedrock: "anthropic.claude-opus-5-5", ollama: "qwen2.5:3b", mock: "mock" }[provider],
   // Ollama serves an Anthropic-compatible Messages API; used as a free local stand-in during development.
   ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
   awsRegion: process.env.AWS_REGION ?? "us-east-1",
