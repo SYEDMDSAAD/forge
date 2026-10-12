@@ -43,11 +43,25 @@ user request ─▶ forge_capability ─▶ Smith (Claude)
 Alexa+ reads the tool list only at deployment and expects answers in under 500 ms ([MCP Toolkit quickstart](https://developer.amazon.com/docs/alexaplus/add-ons/mcp-toolkit-quickstart.html)). So Forge never needs a new tool to be visible to work:
 
 - **`use_skill(name, input)`** runs any learned skill through a fixed tool surface.
-- A plain `forge_capability` call answers *"I'm learning that now"* after `FORGE_WAIT_MS` (400 ms) and finishes in the background.
+- A plain `forge_capability` call answers *"I'm learning that now"* after `FORGE_WAIT_MS` (200 ms) and finishes in the background.
 - **`list_capabilities`** reports progress and skills waiting for approval (*"Current Weather is ready and needs your OK. It will only access api.open-meteo.com…"*); the user says yes by voice and the assistant calls **`approve_capability`**.
 - A **warm pool** of pre-started single-use sandbox runners keeps per-call overhead around 90 ms.
 
 Clients that support tasks, elicitation and `list_changed` get the richer flow automatically.
+
+Tested with clients other than our own:
+
+- **Protocol 2025-03-26** (the version in the Alexa+ lifecycle docs): `scripts/e2e-protocol-2025-03-26.ts` speaks raw JSON-RPC with no SDK, no `MCP-Protocol-Version` header and no elicitation or tasks. Everything works from plain `content` text alone (that version has no `structuredContent`), including the approval id; `forge_capability` answers in ~200 ms, `list_capabilities` and `approve_capability` in under 10 ms.
+- **MCP Inspector** (the official reference client): the full learn → consent → install → answer loop:
+
+```bash
+I="npx -y @modelcontextprotocol/inspector --cli http://localhost:8787/mcp --transport http"
+$I --method tools/call --tool-name forge_capability --tool-arg 'request=weather in Pune'
+$I --method tools/call --tool-name list_capabilities      # "... needs your OK ... (approve with id …)"
+$I --method tools/call --tool-name approve_capability --tool-arg id=<id> --tool-arg approve=true
+$I --method tools/call --tool-name use_skill --tool-arg name=get_current_weather --tool-arg 'input={"city":"Delhi"}'
+# "It's 24 degrees in Delhi right now. Source: Open-Meteo."
+```
 
 ## Quick start
 
@@ -132,7 +146,7 @@ Known limitation: a skill's tests run inside its own sandbox, so deliberately ho
 | `FORGE_SANDBOX` | `docker` | `docker` or `process` (dev only) |
 | `FORGE_SANDBOX_IMAGE` | `node:20-alpine` | Sandbox image |
 | `FORGE_WARM_POOL` | `2` | Pre-started sandbox runners |
-| `FORGE_WAIT_MS` | `400` | How long a plain `forge_capability` call waits before answering "learning" (`Infinity` to wait for the result) |
+| `FORGE_WAIT_MS` | `200` | How long a plain `forge_capability` call waits before answering "learning" (`Infinity` to wait for the result) |
 | `FORGE_MAX_SUBMISSIONS` | `4` | Attempts the Smith gets to pass its tests |
 | `FORGE_MAX_TURNS` | `16` | Model turns per build |
 | `FORGE_TOOL_TIMEOUT_MS` | `15000` | Time limit per skill call |
@@ -142,10 +156,11 @@ Known limitation: a skill's tests run inside its own sandbox, so deliberately ho
 ## Tests
 
 ```bash
-npm test                          # sandbox security attacks + both end-to-end suites below
+npm test                          # sandbox security attacks + the three end-to-end suites below
 npx tsx scripts/sandbox-security.ts # hostile-skill escape attempts; all must fail
 npx tsx scripts/e2e-tasks.ts      # task flow + Alexa-style flow against the mock smith (12 checks)
 npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> remove
+npx tsx scripts/e2e-protocol-2025-03-26.ts  # an older-protocol client with no SDK, text only
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)

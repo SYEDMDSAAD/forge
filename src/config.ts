@@ -37,7 +37,7 @@ export const config = {
   // How long a plain (non-task) forge_capability call waits before answering
   // "still learning" and continuing in the background. Alexa+ expects answers
   // in under 500ms; set FORGE_WAIT_MS=Infinity for clients that can wait.
-  forgeWaitMs: Number(process.env.FORGE_WAIT_MS ?? 400),
+  forgeWaitMs: Number(process.env.FORGE_WAIT_MS ?? 200),
   // Print raw model turns and tool results to stderr.
   debug: process.env.FORGE_DEBUG === "1",
   toolTimeoutMs: Number(process.env.FORGE_TOOL_TIMEOUT_MS ?? 15000),
