@@ -1,12 +1,18 @@
 # Forge — the assistant that learns
 
-AI assistants like Alexa+ are good at what they're connected to, but every connection (an "expert", an add-on) has to be built, certified and approved by a partner. The long tail never gets one: niche public datasets and open APIs (space station position, earthquake feeds, a dictionary, Hacker News) that no partner will ever wrap. And when an assistant answers from its own knowledge instead, it can be confidently wrong, with no way to see where the answer came from.
+**Forge turns "I can't do that yet" into a tested, cited new skill, in under a minute on average.**
 
-Forge is an MCP server for Alexa+ that lets the assistant **build those connections itself, with answers you can verify**:
+Alexa+ already works with tens of thousands of services, but every new one waits for a partner to build, certify and ship an integration. The long tail of public data (space-station position, earthquake feeds, a dictionary, Hacker News…) never gets built.
+
+Forge is an MCP server that lets the assistant build it itself:
 
 > **"I can't do that yet. Give me a minute — I'll learn how."**
 
-When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox, **cross-checks the numbers it says against the source itself**, asks the user's permission (showing exactly which sites it will reach), and installs it. Every answer names its source: *"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."* Next time, it just works.
+When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox, checks the numbers in its answer against the source itself, asks the user's permission (showing exactly which sites it will reach), and installs it. Next time, it just works.
+
+- **Learns:** a new skill in under a minute on average, even with a free model on a laptop (12/12 on our benchmark of varied requests).
+- **Safe:** every run in a fresh locked-down container that can only reach the skill's declared sites; nothing installs without the user's OK.
+- **Trustworthy:** every answer names its source (*"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."*), and numbers are cross-checked against the source before a skill is accepted. It catches the kind of mistake a model really made during our testing: a currency answer 100× too high (`scripts/crosscheck-demo.ts`).
 
 ```
 user request ─▶ forge_capability ─▶ Smith (Claude)
