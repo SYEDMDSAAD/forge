@@ -1,48 +1,59 @@
-// Executed inside the sandbox (container or isolated process). Reads one JSON job
-// from stdin, writes one JSON result to stdout. Untrusted tool code never sees
-// the real fetch: every request goes through the domain allowlist below.
+// Executed inside the sandbox (container or isolated process). The container has
+// no network: the runner's fetch asks the host for each request over stdio, and the
+// host (src/sandbox/relay.ts) enforces the skill's domain allowlist.
+//
+// Protocol, one JSON value per line. stdin: the job, then fetch replies.
+// stdout: "__FORGE_FETCH__{request}" lines, then one "__FORGE_RESULT__{output}".
 import { Buffer } from "node:buffer";
-import net from "node:net";
+import { createInterface } from "node:readline";
 
-// Node gives each IPv6/IPv4 connect attempt 250ms by default; on high-latency
-// links (e.g. India -> EU APIs) that fails ~1 in 4 requests with ETIMEDOUT.
-net.setDefaultAutoSelectFamilyAttemptTimeout(2000);
+// Captured before any untrusted code loads.
+const writeOut = process.stdout.write.bind(process.stdout);
 
-const chunks = [];
-for await (const chunk of process.stdin) chunks.push(chunk);
-const job = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+const pending = new Map();
+let nextId = 1;
+let resolveJob;
+const jobReady = new Promise((resolve) => (resolveJob = resolve));
+const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+lines.on("line", (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (resolveJob) {
+    const resolve = resolveJob;
+    resolveJob = undefined;
+    return resolve(msg);
+  }
+  pending.get(msg.id)?.(msg);
+  pending.delete(msg.id);
+});
+lines.on("close", () => {
+  if (resolveJob) process.exit(0); // warm-pool runner shut down before getting a job
+  for (const reply of pending.values()) reply({ ok: false, code: "ECLOSED", error: "Sandbox input closed" });
+});
+const job = await jobReady;
 
 const logs = [];
-const fetched = [];
 const capture = (...args) => logs.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
 console.log = console.info = console.warn = console.error = console.debug = capture;
 
-const realFetch = globalThis.fetch;
-const allowed = (job.allowedDomains ?? []).map((d) => d.toLowerCase());
-const isAllowed = (host) => allowed.some((d) => host === d || host.endsWith("." + d));
-
-const checkUrl = (url) => {
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`Blocked protocol ${url.protocol}`);
-  if (!isAllowed(url.hostname.toLowerCase())) {
-    throw new Error(`Blocked by Forge sandbox: ${url.hostname} is not in this tool's allowed domains (${allowed.join(", ") || "none"})`);
-  }
-};
-
 globalThis.fetch = async (resource, init = {}) => {
-  let url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
-  const headers = new Headers(init.headers ?? {});
-  if (!headers.has("user-agent")) headers.set("user-agent", "Forge/1.0 (MCP skill sandbox)");
-  const signal = AbortSignal.timeout(job.fetchTimeoutMs ?? 10000);
-  // Follow redirects by hand so every hop is checked against the allowlist.
-  for (let hop = 0; hop <= 5; hop++) {
-    checkUrl(url);
-    fetched.push(url.href);
-    const res = await realFetch(url, { ...init, headers, signal, redirect: "manual" });
-    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-    if (!location) return res;
-    url = new URL(location, url);
+  const url = typeof resource === "string" || resource instanceof URL ? String(resource) : resource.url;
+  const headers = Object.fromEntries(new Headers(init.headers ?? {}));
+  const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer()).toString("base64");
+  const id = nextId++;
+  const reply = await new Promise((resolve) => {
+    pending.set(id, resolve);
+    writeOut("__FORGE_FETCH__" + JSON.stringify({ id, url, method: init.method ?? "GET", headers, body }) + "\n");
+  });
+  if (!reply.ok) {
+    if (reply.code === "EBLOCKED" || reply.code === "EPRIVATEADDR" || reply.code === "EPROTOCOL") throw new Error(reply.error);
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error(reply.error), { code: reply.code }) });
   }
-  throw new Error("Too many redirects");
+  const nullBody = [101, 204, 205, 304].includes(reply.status);
+  const res = new Response(nullBody ? null : Buffer.from(reply.body, "base64"), { status: reply.status, statusText: reply.statusText, headers: reply.headers });
+  Object.defineProperty(res, "url", { value: reply.url });
+  Object.defineProperty(res, "redirected", { value: reply.redirected });
+  return res;
 };
 
 const withTimeout = (promise, ms, label) =>
@@ -147,6 +158,4 @@ try {
   output = { ok: false, error: errorText(e) };
 }
 output.logs = logs.join("\n").slice(0, 4000);
-output.fetched = fetched;
-process.stdout.write("\n__FORGE_RESULT__" + JSON.stringify(output) + "\n");
-process.exit(0);
+writeOut("\n__FORGE_RESULT__" + JSON.stringify(output) + "\n", () => process.exit(0));

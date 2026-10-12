@@ -104,13 +104,17 @@ Choosing which skill answers a request is normally the assistant's job (Alexa+ o
 
 Generated code is untrusted. Forge assumes it may be wrong or hostile:
 
-- **Static checks** before anything runs: no imports, `require`, `process`, `eval`, `new Function` or Node built-ins; size limits; a valid input schema.
-- **One-shot containers**: every run gets a fresh container (`--read-only`, `--cap-drop ALL`, `no-new-privileges`, non-root, 256 MB, 1 CPU, 64 PIDs, no host mounts). Nothing is shared between calls.
-- **Per-skill domain allowlist**: tool code never sees the real `fetch`; requests to hosts outside the skill's declared domains throw.
+- **No network in the sandbox**: every run gets a fresh container with `--network none` (plus `--read-only`, `--cap-drop ALL`, `no-new-privileges`, non-root, 256 MB, 1 CPU, 64 PIDs, no host mounts). Nothing is shared between calls.
+- **Host-enforced domain allowlist**: the only way out is the runner's `fetch`, which asks Forge on the host (`src/sandbox/relay.ts`). Forge checks the skill's declared domains on every redirect hop, refuses any name that resolves to this machine or a private network (no SSRF to local services such as Ollama), and caps requests (50) and response size (5 MB) per run.
+- **Static checks** before anything runs (no imports, `require`, `process`, `eval`, `new Function` or Node built-ins, also through comments). These catch honest mistakes early; the network-less container is the actual boundary.
 - **Time limits** per call and per test run.
 - **Human consent** before any skill is installed, showing exactly which sites it will access.
 - **Answers you can check**: every answer names its source, and for numeric sources the live test cross-checks the numbers in the answer against the source itself (a hand-written reference check per source). This catches skills that read or compute a value wrongly, e.g. a currency conversion applied twice.
 - **No secrets**: skills only use keyless public sources. Requests that need a login, payment or private data are declined.
+
+`scripts/sandbox-security.ts` (part of `npm test`) attacks the sandbox like a hostile skill would: loading Node's network modules directly, raw IP addresses, sites off the allowlist, redirects to other sites, names that resolve to 127.0.0.1, and request floods. All must fail.
+
+Known limitation: a skill's tests run inside its own sandbox, so deliberately hostile code could fake its own test results. That can't get it past the network boundary or the user's consent (which shows exactly which sites it will reach); moving test evaluation out of the sandbox is on the roadmap.
 
 `FORGE_SANDBOX=process` runs code in a separate Node process instead of Docker. It is a development fallback only, not an isolation boundary.
 
@@ -138,7 +142,8 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 ## Tests
 
 ```bash
-npm test                          # both end-to-end suites below
+npm test                          # sandbox security attacks + both end-to-end suites below
+npx tsx scripts/sandbox-security.ts # hostile-skill escape attempts; all must fail
 npx tsx scripts/e2e-tasks.ts      # task flow + Alexa-style flow against the mock smith (12 checks)
 npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> remove
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked

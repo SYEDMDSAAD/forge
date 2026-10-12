@@ -34,7 +34,10 @@ export function validateSpec(spec: ToolSpec): string[] {
   if (!/export\s+default\s+(async\s+)?function/.test(spec.code)) {
     problems.push("code must `export default async function run(input)`");
   }
-  for (const [pattern, why] of FORBIDDEN) if (pattern.test(spec.code)) problems.push(why);
+  // Comments can split a keyword from its "(" (import/**/(...)), so check a comment-free copy too.
+  // These checks only catch honest mistakes early; the network-less container is the real boundary.
+  const uncommented = spec.code.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  for (const [pattern, why] of FORBIDDEN) if (pattern.test(spec.code) || pattern.test(uncommented)) problems.push(why);
   if (spec.code.length > 20000) problems.push("code is too long (20k char limit)");
 
   if (spec.allowedDomains.length === 0) problems.push("allowed_domains must list every host the tool fetches");

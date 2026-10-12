@@ -3,9 +3,13 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
+import { relayFetch, type RelayRequest } from "./relay.js";
 
 const RUNNER = readFileSync(fileURLToPath(new URL("./runner.mjs", import.meta.url)), "utf8");
 const MARKER = "__FORGE_RESULT__";
+const FETCH_MARKER = "__FORGE_FETCH__";
+// Per job; a skill making more requests than this is broken or hostile.
+const MAX_FETCHES = 50;
 
 export interface SandboxJob {
   mode: "run" | "test" | "probe";
@@ -23,15 +27,16 @@ export interface SandboxOutput {
 }
 
 /**
- * Locked-down container: no host mounts, read-only root, no capabilities,
- * non-root user, capped memory/CPU/PIDs. Network egress is open at the
- * container level; the runner enforces the per-tool domain allowlist.
+ * Locked-down container: no network, no host mounts, read-only root, no
+ * capabilities, non-root user, capped memory/CPU/PIDs. The only way out is the
+ * runner's fetch, which the host relays (relay.ts) under the skill's allowlist.
  */
 function dockerCommand(): [string, string[]] {
   return [
     "docker",
     [
       "run", "--rm", "-i",
+      "--network", "none",
       "--read-only",
       "--tmpfs", "/tmp:rw,size=16m",
       "--memory", "256m",
@@ -46,7 +51,7 @@ function dockerCommand(): [string, string[]] {
   ];
 }
 
-/** Dev fallback when Docker is unavailable: separate process, empty env, Node permission model. */
+/** Dev fallback when Docker is unavailable: separate process, empty env, Node permission model. Not a network boundary. */
 function processCommand(): [string, string[]] {
   return [process.execPath, ["--experimental-permission", "--input-type=module", "-e", RUNNER]];
 }
@@ -55,6 +60,8 @@ interface Runner {
   child: ChildProcessWithoutNullStreams;
   out: { stdout: string; stderr: string };
   closed: Promise<number | null>;
+  /** Set when the runner is given a job: handles its fetch requests. */
+  onFetch?: (req: RelayRequest) => void;
 }
 
 function spawnRunner(): Runner {
@@ -65,10 +72,26 @@ function spawnRunner(): Runner {
     stdio: ["pipe", "pipe", "pipe"],
   });
   const out = { stdout: "", stderr: "" };
-  child.stdout.on("data", (d) => (out.stdout += d));
+  const runner: Runner = { child, out, closed: new Promise((resolve) => child.on("close", resolve)) };
+  let partial = "";
+  child.stdout.on("data", (d) => {
+    out.stdout += d;
+    partial += d;
+    const lines = partial.split("\n");
+    partial = lines.pop()!;
+    for (const line of lines) {
+      const at = line.indexOf(FETCH_MARKER);
+      if (at === -1) continue;
+      try {
+        runner.onFetch?.(JSON.parse(line.slice(at + FETCH_MARKER.length)) as RelayRequest);
+      } catch {
+        // malformed request line: ignore
+      }
+    }
+  });
   child.stderr.on("data", (d) => (out.stderr += d));
-  const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
-  return { child, out, closed };
+  child.stdin.on("error", () => {}); // runner may exit before a relayed reply arrives
+  return runner;
 }
 
 // Pre-started runners blocked on stdin, so a call doesn't pay container start-up
@@ -120,12 +143,21 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   // Container start-up plus every test's own budget.
   const hardLimit = timeoutMs * tests + 20000;
 
-  const { child, out, closed } = takeRunner();
-  child.stdin.end(JSON.stringify({ ...job, timeoutMs }));
+  const runner = takeRunner();
+  const { child, out, closed } = runner;
+  const fetched: string[] = [];
+  let fetches = 0;
+  runner.onFetch = (req) => {
+    const reply = (msg: object) => child.stdin.writable && child.stdin.write(JSON.stringify(msg) + "\n");
+    if (++fetches > MAX_FETCHES) return void reply({ id: req.id, ok: false, code: "ELIMIT", error: `More than ${MAX_FETCHES} requests in one run` });
+    void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000)).then(reply);
+  };
+  child.stdin.write(JSON.stringify({ ...job, timeoutMs }) + "\n");
 
   const timer = setTimeout(() => child.kill("SIGKILL"), hardLimit);
   const code = await closed;
   clearTimeout(timer);
+  child.stdin.end();
 
   const idx = out.stdout.lastIndexOf(MARKER);
   if (idx === -1) {
@@ -133,8 +165,9 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
       ok: false,
       error: `Sandbox exited (code ${code}) without a result. ${out.stderr.slice(-1500)}`.trim(),
       logs: "",
-      fetched: [],
+      fetched,
     };
   }
-  return JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput;
+  // The host's record of what was fetched, not the runner's.
+  return { ...(JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput), fetched };
 }
