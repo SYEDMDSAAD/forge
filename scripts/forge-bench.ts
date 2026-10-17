@@ -61,7 +61,7 @@ const args = process.argv.slice(2);
 const large = args.includes("--large");
 const runs = Number(args.find((a) => a.startsWith("--runs="))?.slice(7) ?? 1);
 const filter = args.find((a) => !a.startsWith("--"))?.toLowerCase();
-const cases = (large ? LARGE : CASES).filter((c) => !filter || c.request.toLowerCase().includes(filter));
+const cases = (large ? LARGE : CASES).filter((c) => !filter || filter.split("|").some((f) => c.request.toLowerCase().includes(f)));
 console.log(`smith=${config.smith} provider=${config.provider} model=${config.model} cases=${cases.length} runs=${runs}\n`);
 
 interface Row {

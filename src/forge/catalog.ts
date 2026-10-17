@@ -86,7 +86,8 @@ const CRYPTO_REFERENCE: Reference = {
   code: `export default async function (input) {
   const strings = Object.values(input).filter((v) => typeof v === "string").map((v) => v.trim().toLowerCase());
   const coin = strings.find((v) => !/^[a-z]{3}$/.test(v));
-  const currency = strings.find((v) => /^[a-z]{3}$/.test(v)) ?? "inr";
+  // No currency in the input means the skill picks its own, so accept the common ones.
+  const currency = strings.find((v) => /^[a-z]{3}$/.test(v)) ?? "usd,inr,eur";
   if (!coin) return [];
   const p = await (await fetch(\`https://api.coingecko.com/api/v3/simple/price?ids=\${encodeURIComponent(coin)}&vs_currencies=\${currency}&include_24hr_change=true\`)).json();
   return Object.values(p[coin] ?? {});

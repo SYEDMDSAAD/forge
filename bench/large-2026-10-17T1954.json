@@ -1,0 +1,188 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 3,
+  "rows": [
+    {
+      "run": 1,
+      "request": "How much is one ethereum worth in dollars?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 110.635,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 2413.55, but the source reports 229080, -0.0)"
+    },
+    {
+      "run": 1,
+      "request": "Is dogecoin up or down today?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 132.865,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 0.08, 24, -0.35, but the source reports 7.58)"
+    },
+    {
+      "run": 1,
+      "request": "What's the meaning of the word ubiquitous?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 32.128,
+      "attempts": 1,
+      "skill": "get_word_meaning",
+      "speech": "The word ubiquitous means Being everywhere at once: omnipresent."
+    },
+    {
+      "run": 1,
+      "request": "Was there an earthquake in Japan recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 62.957,
+      "attempts": 2,
+      "skill": "get_recent_earthquake",
+      "speech": "The most recent significant earthquake in Japan was a 4.6 magnitude event that occurred in 88 km SSW of Uyuni, Bolivia on 10/17/2026, 4:52:45 PM."
+    },
+    {
+      "run": 1,
+      "request": "What's the next public holiday in the US?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 96.655,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: TypeError: Cannot read properties of undefined (reading 'name'))"
+    },
+    {
+      "run": 1,
+      "request": "Any public holidays coming up in Germany?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 115.999,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: - speech says nothing was found or an error happened, but the example input is v)"
+    },
+    {
+      "run": 2,
+      "request": "How much is one ethereum worth in dollars?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 105.239,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 2414.64, but the source reports 229295, 0.41)"
+    },
+    {
+      "run": 2,
+      "request": "Is dogecoin up or down today?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 116.666,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 0.08, 0.03, 24, but the source reports 7.59,)"
+    },
+    {
+      "run": 2,
+      "request": "What's the meaning of the word ubiquitous?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 29.133,
+      "attempts": 1,
+      "skill": "get_word_meaning",
+      "speech": "The word ubiquitous means Being everywhere at once: omnipresent."
+    },
+    {
+      "run": 2,
+      "request": "Was there an earthquake in Japan recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 44.43,
+      "attempts": 1,
+      "skill": "get_recent_earthquakes",
+      "speech": "There were no earthquakes reported in Japan recently."
+    },
+    {
+      "run": 2,
+      "request": "What's the next public holiday in the US?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 100.197,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: - speech is an apology, but the example input is valid: the request or the parsi)"
+    },
+    {
+      "run": 2,
+      "request": "Any public holidays coming up in Germany?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 117.569,
+      "attempts": 4,
+      "skill": "get_public_holidays",
+      "speech": "Please provide a valid two-letter ISO country code."
+    },
+    {
+      "run": 3,
+      "request": "How much is one ethereum worth in dollars?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 100.891,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 2418.2, but the source reports 229600, 0.52 )"
+    },
+    {
+      "run": 3,
+      "request": "Is dogecoin up or down today?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 123.389,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: Cross-check failed: the answer says 0.08, 0.08, 24, but the source reports 7.59,)"
+    },
+    {
+      "run": 3,
+      "request": "What's the meaning of the word ubiquitous?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 29.704,
+      "attempts": 1,
+      "skill": "get_word_meaning",
+      "speech": "The word ubiquitous means Being everywhere at once: omnipresent."
+    },
+    {
+      "run": 3,
+      "request": "Was there an earthquake in Japan recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 58.851,
+      "attempts": 2,
+      "skill": "get_recent_earthquake_info",
+      "speech": "The most recent earthquake in Japan was a magnitude 4.6 in 88 km SSW of Uyuni, Bolivia, reported at 10/17/2026, 4:52:45 PM."
+    },
+    {
+      "run": 3,
+      "request": "What's the next public holiday in the US?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 76.585,
+      "attempts": 3,
+      "skill": "get_next_public_holiday",
+      "speech": "The next public holiday in US is on 2026-11-11, which is Veterans Day."
+    },
+    {
+      "run": 3,
+      "request": "Any public holidays coming up in Germany?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 64.897,
+      "attempts": 2,
+      "skill": "get_public_holidays",
+      "speech": "The next public holiday in Germany is Reformationstag on 2026-10-31 and Allerheiligen on 2026-11-01."
+    }
+  ]
+}

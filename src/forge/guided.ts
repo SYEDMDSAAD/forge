@@ -72,12 +72,15 @@ Set natural=true unless there is a clear problem. If natural=false, describe the
 // Checks every skill must pass on the example input (which is a valid request,
 // so "sorry, not found" is a failure there). Kept in sync with speechProblems().
 const questionOf = (request: string) => request.toLowerCase().replace(/[?.!\s]+$/, "");
+// "Nothing found" or an error on a valid example means the URL or parsing is wrong.
+const NOTHING = "\\berror\\b|\\bfailed\\b|not found|\\bno\\b[^.]{0,40}\\bfound\\b|no (data|results|information)\\b|not available|please provide|\\binvalid\\b";
 
 export function speechAssert(request: string): string {
   return [
     "typeof result.speech === 'string' && result.speech.length >= 15",
     "!/undefined|NaN|\\[object Object\\]|\\bnull\\b/.test(result.speech)",
     "!/sorry|couldn.?t|could not|unable|not find|apolog/i.test(result.speech)",
+    `!/${NOTHING}/i.test(result.speech)`,
     "!/\\?\\s*$/.test(result.speech)",
     "!/\\d\\.\\d{3,}/.test(result.speech)",
     `!result.speech.toLowerCase().includes(${JSON.stringify(questionOf(request))})`,
@@ -93,6 +96,8 @@ function speechProblems(result: unknown, request: string): string[] {
   if (/undefined|NaN|\[object Object\]|\bnull\b/.test(r.speech)) p.push("speech contains undefined/NaN/null/[object Object]: a field name is wrong; use the exact fields from the example response");
   if (/sorry|couldn.?t|could not|unable|not find|apolog/i.test(r.speech))
     p.push("speech is an apology, but the example input is valid: the request or the parsing is wrong (check the URL and field names against the example response)");
+  if (new RegExp(NOTHING, "i").test(r.speech))
+    p.push("speech says nothing was found or an error happened, but the example input is valid: the request or the parsing is wrong (check the URL, the parameter format such as country codes, and field names against the example response)");
   if (/\?\s*$/.test(r.speech)) p.push("speech must end with an answer, not a question");
   if (/\d\.\d{3,}/.test(r.speech)) p.push("round the numbers in speech (Math.round, or toFixed(1) for small values)");
   if (r.speech.toLowerCase().includes(questionOf(request))) p.push("speech repeats the user's question; say only the answer");
