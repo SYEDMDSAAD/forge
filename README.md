@@ -15,7 +15,7 @@ When no tool fits a request, Forge writes a new skill against a named public sou
 - **Trustworthy:** every answer names its source (*"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."*), and numbers are cross-checked against the source before a skill is accepted. It catches the kind of mistake a model really made during our testing: a currency answer 100× too high (`scripts/crosscheck-demo.ts`).
 
 ```
-user request ─▶ forge_capability ─▶ Smith (Claude)
+user request ─▶ forge_capability ─▶ Smith (local model or Claude)
                                      │  probe real APIs
                                      │  write tool + tests
                                      ▼
@@ -102,7 +102,7 @@ Point any Streamable HTTP MCP client at `http://localhost:8787/mcp`. To reach it
 
 ### Two smiths
 
-- **Agent** (default with Claude): an open-ended tool-use loop. Claude probes any public API, writes the skill and its tests, and repairs it from real failures.
+- **Agent** (default with Claude): an open-ended tool-use loop. Claude probes any public API, writes the skill and its tests, and repairs it from real failures. It is implemented but not yet run end to end (this project was built at zero cost; every result in this README comes from the guided smith on a free local model).
 - **Guided** (default with Ollama, `FORGE_SMITH=guided`): for small local models. Short steps, each constrained to a JSON schema: pick a source from the verified catalog (`src/forge/catalog.ts`), look at real responses, fill in a code template, then repair or start over based on the exact failure (located syntax errors, plain-language reasons why the answer was rejected).
 
 Every skill must pass a live test on an example input whose answer is a real spoken sentence: no `undefined`/`NaN`, no apology, not a question, not an echo of the user's question.
@@ -203,7 +203,7 @@ Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
 - Working and tested: the MCP server, sandbox, runtime tool registration, tasks, elicitation, the Alexa-compatible flow and the demo client.
 - Working on a local model: the guided smith (see `scripts/forge-bench.ts`).
-- In progress: the agent smith on Claude, deployment on AWS, and an Alexa+ add-on.
+- Written but not yet run: the agent smith on Claude (API or Bedrock). Not done: deployment on AWS, and a published Alexa+ add-on.
 - Known gap for a real Alexa+ add-on: certification. Alexa+ policy rejects open-ended text inputs and tools unrelated to an add-on's stated purpose, and skills generated after certification would need their own review. A realistic path is Forge as a developer tool: skills are learned, reviewed by a person, then shipped as ordinary certified add-ons.
 
 ## License
