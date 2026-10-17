@@ -5,3 +5,4 @@ data
 web/public/app.js
 web/public/app.js.map
 submission/
+exports/

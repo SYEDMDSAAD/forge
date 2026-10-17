@@ -109,6 +109,26 @@ Every skill must pass a live test on an example input whose answer is a real spo
 
 `scripts/forge-bench.ts` builds 12 varied requests from scratch (weather, rain, air quality, ISS, currency, crypto, Wikipedia, Hacker News, dictionary, rocket launches, earthquakes, and one that must be refused). With `qwen2.5-coder:7b` on a laptop (RTX 3050, 4 GB) the guided smith got 12/12 in one run, about 55 s per skill.
 
+## From learned skill to certifiable add-on
+
+Alexa+ certification rejects open-ended tools, and code generated after certification would need its own review. So Forge can hand a learned skill over as an ordinary, standalone MCP server that a person reviews and ships like any hand-written integration:
+
+```bash
+npx tsx scripts/export-skill.ts                      # list learned skills
+npx tsx scripts/export-skill.ts convert_currency     # -> exports/convert_currency/
+cd exports/convert_currency && npm install && npm test && npm start
+```
+
+The folder has no dependency on Forge, a model or a sandbox:
+
+- `skill.mjs`: the code Forge wrote, unchanged (the file to review);
+- `lib.mjs`: a `fetch` limited to the skill's declared sites (on every redirect), the answer clean-up, source citation and cross-check;
+- `server.mjs`: a stateless Streamable HTTP MCP server with exactly one read-only tool and its fixed input schema;
+- `test.mjs`: the skill's live tests and source cross-check, flagging answers slower than 500 ms;
+- `forge-export.json` (definition and provenance: request, attempts, test results), `Dockerfile`, and a `README.md` with a review checklist (code, tests, the source's terms of use, latency, personal data, HTTPS).
+
+`scripts/export-check.ts` (part of `npm test`) exports a skill and runs the result on its own: its tests pass with the cross-check, its server lists one tool and answers with the source, wrong input is rejected and undeclared sites are refused.
+
 ## The demo client
 
 `web/app.ts` is an Alexa+-style page that is itself an MCP client: it calls `forge_capability` as a task and shows the build steps live, answers the server's elicitation with a consent card, follows `tools/list_changed`, and supports voice in (Web Speech API, Chrome) and spoken answers. It is bundled by `npm run build:web` (run automatically by `npm start`).
@@ -163,12 +183,13 @@ Known limitation: a skill's tests run inside its own sandbox, so deliberately ho
 ## Tests
 
 ```bash
-npm test                          # sandbox security attacks, the three end-to-end suites and the cache check below
+npm test                          # sandbox security attacks, the three end-to-end suites, the cache and export checks below
 npx tsx scripts/sandbox-security.ts # hostile-skill escape attempts; all must fail
 npx tsx scripts/e2e-tasks.ts      # task flow + Alexa-style flow against the mock smith (12 checks)
 npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> remove
 npx tsx scripts/e2e-protocol-2025-03-26.ts  # an older-protocol client with no SDK, text only
 npx tsx scripts/cache-check.ts    # fresh replies reused, no-cache respected, down sources answered with their age
+npx tsx scripts/export-check.ts   # an exported skill runs on its own: tests, one-tool server, allowlist
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)
@@ -188,6 +209,7 @@ src/
   forge/catalog.ts    verified keyless public APIs
   forge/validate.ts   static checks on generated code
   forge/registry.ts   persisted skills, shared by all sessions
+  forge/export.ts     a learned skill as a standalone MCP server folder, for review
   forge/mock.ts       replay provider
   sandbox/sandbox.ts  container runner + warm pool
   sandbox/runner.mjs  code that runs inside the sandbox (fetch allowlist, tests)
@@ -204,7 +226,7 @@ Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 - Working and tested: the MCP server, sandbox, runtime tool registration, tasks, elicitation, the Alexa-compatible flow and the demo client.
 - Working on a local model: the guided smith (see `scripts/forge-bench.ts`).
 - Written but not yet run: the agent smith on Claude (API or Bedrock). Not done: deployment on AWS, and a published Alexa+ add-on.
-- Known gap for a real Alexa+ add-on: certification. Alexa+ policy rejects open-ended text inputs and tools unrelated to an add-on's stated purpose, and skills generated after certification would need their own review. A realistic path is Forge as a developer tool: skills are learned, reviewed by a person, then shipped as ordinary certified add-ons.
+- Known gap for a real Alexa+ add-on: certification. Alexa+ policy rejects open-ended text inputs and tools unrelated to an add-on's stated purpose, and skills generated after certification would need their own review. A realistic path is Forge as a developer tool: skills are learned, reviewed by a person, then shipped as ordinary certified add-ons. `scripts/export-skill.ts` does the hand-over (see above).
 
 ## License
 

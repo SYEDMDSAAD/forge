@@ -23,7 +23,7 @@ const get = (lib: string, url: string) => `
   return { speech: "REACHED status " + status };`;
 
 try {
-  let said = await attempt(`const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=18.5&longitude=73.8&current=temperature_2m"); return { speech: "status " + r.status + " " + (await r.json()).current.temperature_2m };`, ["open-meteo.com"]);
+  let said = await attempt(`const r = await fetch("https://api.frankfurter.dev/v1/latest?base=USD&symbols=INR"); return { speech: "status " + r.status + " " + (await r.json()).rates.INR };`, ["frankfurter.dev"]);
   check(/^status 200 -?\d/i.test(said), "an allowed site works through the relay", said);
 
   said = await attempt(get("https", "https://example.com/"), ["open-meteo.com"]);

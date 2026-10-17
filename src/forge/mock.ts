@@ -5,7 +5,7 @@ import type { ForgeEvent, ToolSpec } from "./types.js";
 // FORGE_PROVIDER=mock: replays a known-good forge with realistic pacing, so the
 // MCP task flow and the web client can be developed without a model. The tests
 // still run for real in the sandbox.
-const WEATHER: ToolSpec = {
+const ONLINE_WEATHER: ToolSpec = {
   name: "get_current_weather",
   title: "Current Weather",
   description: "Gets the current temperature and conditions for a city by name. Use when the user asks about the weather right now somewhere.",
@@ -22,9 +22,20 @@ const WEATHER: ToolSpec = {
   tests: [{ name: "pune", input: { city: "Pune" }, assert: "typeof result.data.temperature_2m === 'number' && result.speech.includes('Pune')" }],
 };
 
+// FORGE_MOCK_OFFLINE=1 (the test suites): same skill, but it makes up a temperature
+// instead of calling Open-Meteo, so tests don't depend on a third-party server.
+const OFFLINE_WEATHER: ToolSpec = {
+  ...ONLINE_WEATHER,
+  code: `export default async function run({ city }) {
+  const temperature_2m = 20 + [...city].reduce((n, c) => n + c.charCodeAt(0), 0) % 15;
+  return { speech: \`It's \${temperature_2m} degrees in \${city} right now.\`, data: { place: city, temperature_2m } };
+}`,
+};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function mockForge(_request: string, onEvent: (e: ForgeEvent) => void): Promise<SmithResult> {
+  const WEATHER = process.env.FORGE_MOCK_OFFLINE === "1" ? OFFLINE_WEATHER : ONLINE_WEATHER;
   const pace = Number(process.env.FORGE_MOCK_PACE_MS ?? 800);
   onEvent({ stage: "thinking", message: "Designing the capability" });
   await sleep(pace);

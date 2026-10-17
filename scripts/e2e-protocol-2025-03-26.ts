@@ -9,7 +9,7 @@ const PORT = 8797;
 const dataDir = "data-e2e-protocol";
 rmSync(dataDir, { recursive: true, force: true });
 const server = spawn("npx", ["tsx", "src/index.ts"], {
-  env: { ...process.env, PORT: String(PORT), FORGE_PROVIDER: "mock", FORGE_DATA_DIR: dataDir, FORGE_MOCK_PACE_MS: "300" },
+  env: { ...process.env, PORT: String(PORT), FORGE_PROVIDER: "mock", FORGE_MOCK_OFFLINE: "1", FORGE_DATA_DIR: dataDir, FORGE_MOCK_PACE_MS: "300" },
   stdio: ["ignore", "pipe", "inherit"],
   detached: true,
 });
@@ -77,8 +77,7 @@ try {
   check(approved.ms < 500 && /install/i.test(approved.text), `approve_capability answers in ${approved.ms}ms: "${approved.text.slice(0, 90)}"`);
 
   const used = await call("use_skill", { name: "get_current_weather", input: { city: "Delhi" } });
-  // A live public source can be overloaded; then the answer must say so plainly.
-  check((/degrees in Delhi/.test(used.text) && /Source: /.test(used.text)) || /^Open-Meteo isn't answering right now/.test(used.text), `use_skill answer is plain text with its source (${used.ms}ms, includes the live weather API): "${used.text}"`);
+  check(/degrees in Delhi/.test(used.text) && /Source: Open-Meteo/.test(used.text), `use_skill answer is plain text with its source (${used.ms}ms): "${used.text}"`);
 
   const unknown = await rpc("tools/call", { name: "use_skill", arguments: { name: "no_such_skill", input: {} } });
   check(unknown.msg?.result?.isError === true, "unknown skill comes back as a tool error, not a crash");

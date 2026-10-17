@@ -13,6 +13,7 @@ import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/proto
 import * as z from "zod/v4";
 import { ForgeFailed, forgeTool } from "./forge/smith.js";
 import { Registry } from "./forge/registry.js";
+import { sourcesOf } from "./forge/export.js";
 import type { Capability, ForgeEvent } from "./forge/types.js";
 import { runInSandbox } from "./sandbox/sandbox.js";
 import { config } from "./config.js";
@@ -99,11 +100,6 @@ const text = (t: string, structured?: Record<string, unknown>): CallToolResult =
   ...(structured ? { structuredContent: structured } : {}),
 });
 
-/** Where a skill's answers come from: its declared sources, else the sites it may reach. */
-function sourcesOf(cap: Capability): string[] {
-  if (cap.spec.sources?.length) return cap.spec.sources;
-  return [...new Set(cap.spec.allowedDomains.map((d) => d.split(".").slice(-2).join(".")))];
-}
 
 function ago(ms: number): string {
   const min = Math.round(ms / 60_000);
