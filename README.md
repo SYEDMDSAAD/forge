@@ -10,7 +10,7 @@ Forge is an MCP server that lets the assistant build it itself:
 
 When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox, checks the numbers in its answer against the source itself, asks the user's permission (showing exactly which sites it will reach), and installs it. Next time, it just works.
 
-- **Learns:** a new skill in under a minute on average, even with a free model on a laptop (12/12 on our benchmark of varied requests).
+- **Learns:** a new skill in under a minute on average, even with a free model on a laptop (12/12 on our core benchmark; 63/72 on 24 new wordings, with all 18 unsafe requests refused).
 - **Safe:** every run in a fresh locked-down container that can only reach the skill's declared sites; nothing installs without the user's OK.
 - **Trustworthy:** every answer names its source (*"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."*), and numbers are cross-checked against the source before a skill is accepted. It catches the kind of mistake a model really made during our testing: a currency answer 100× too high (`scripts/crosscheck-demo.ts`).
 
@@ -107,7 +107,12 @@ Point any Streamable HTTP MCP client at `http://localhost:8787/mcp`. To reach it
 
 Every skill must pass a live test on an example input whose answer is a real spoken sentence: no `undefined`/`NaN`, no apology, not a question, not an echo of the user's question.
 
-`scripts/forge-bench.ts` builds 12 varied requests from scratch (weather, rain, air quality, ISS, currency, crypto, Wikipedia, Hacker News, dictionary, rocket launches, earthquakes, and one that must be refused). With `qwen2.5-coder:7b` on a laptop (RTX 3050, 4 GB) the guided smith got 12/12 in one run, about 55 s per skill.
+`scripts/forge-bench.ts` builds requests from scratch with `qwen2.5-coder:7b` on a laptop (RTX 3050, 4 GB). Results are saved in `bench/`.
+
+- **Core set** (12 requests: weather, rain, air quality, ISS, currency, crypto, Wikipedia, Hacker News, dictionary, rocket launches, earthquakes, and one that must be refused): 12/12, about 49 s per skill.
+- **Large set** (`--large --runs=3`: 24 new wordings across all 11 sources, plus 6 requests that need a login, payment or private data), 90 builds: 81/90 as expected. All 18 unsafe requests were refused; 63/72 skills built (52 on the first attempt); 48 s mean, 46 s median, 137 s slowest.
+- **Answers checked by hand.** "Built" isn't "right", so we read every answer. 6 of the 63 built skills gave wrong answers: "no holidays found" for Germany (3×), a broken US-holiday skill (1×), and an earthquake in another country reported for "Japan" (2×). The 9 misses were refusals, not wrong installs; 6 of them were our own cross-check wrongly assuming rupees for a dollar crypto answer.
+- **After fixing both** (an answer that says "nothing found", "error" or "invalid" on a valid example now fails the test; the crypto check accepts dollars, rupees and euros), the 5 weakest requests × 3 runs: crypto 6/6 built and correct; holidays turned from wrong answers into correct ones or safe refusals. One known limit remains: the earthquake skill doesn't always filter by country (2 of 3 runs answered with a quake elsewhere). The cross-check verifies numbers, not whether a filter was applied.
 
 ## From learned skill to certifiable add-on
 
