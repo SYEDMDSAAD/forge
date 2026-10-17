@@ -44,6 +44,7 @@ Alexa+ reads the tool list only at deployment and expects answers in under 500 m
 
 - **`use_skill(name, input)`** runs any learned skill through a fixed tool surface.
 - A plain `forge_capability` call answers *"I'm learning that now"* after `FORGE_WAIT_MS` (200 ms) and finishes in the background.
+- **The user hears back without asking.** When a background build finishes, the news rides along with the next answer from any Forge tool (*"Also tell the user: I've finished learning "Air Quality" and it needs your OK…"*), once per session, so a voice assistant that only reads tool results still passes it on. Connected clients are also told at once with an MCP log notice (`level: "notice"`, `data.stage: "skill_ready"` or `"skill_failed"`); the demo page speaks it, shows the consent card and then answers the original request. (A true push to an Echo device would go through Alexa's own notifications, which MCP add-ons can't send today.)
 - **`list_capabilities`** reports progress and skills waiting for approval (*"Current Weather is ready and needs your OK. It will only access api.open-meteo.com…"*); the user says yes by voice and the assistant calls **`approve_capability`**.
 - A **warm pool** of pre-started single-use sandbox runners keeps per-call overhead around 90 ms.
 
@@ -124,6 +125,7 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 - **Host-enforced domain allowlist**: the only way out is the runner's `fetch`, which asks Forge on the host (`src/sandbox/relay.ts`). Forge checks the skill's declared domains on every redirect hop, refuses any name that resolves to this machine or a private network (no SSRF to local services such as Ollama), and caps requests (50) and response size (5 MB) per run.
 - **Static checks** before anything runs (no imports, `require`, `process`, `eval`, `new Function` or Node built-ins, also through comments). These catch honest mistakes early; the network-less container is the actual boundary.
 - **Time limits** per call and per test run.
+- **Busy sources**: a GET that gets 429/502/503/504 is retried twice with a short pause; if the source is still down, the user hears that in plain words (*"Open-Meteo isn't answering right now (the service is overloaded). Try again in a minute."*) instead of an error.
 - **Human consent** before any skill is installed, showing exactly which sites it will access.
 - **Answers you can check**: every answer names its source, and for numeric sources the live test cross-checks the numbers in the answer against the source itself (a hand-written reference check per source). This catches skills that read or compute a value wrongly, e.g. a currency conversion applied twice.
 - **No secrets**: skills only use keyless public sources. Requests that need a login, payment or private data are declined.

@@ -1,5 +1,5 @@
 import type { SmithResult } from "./smith.js";
-import { testSpec } from "./smith.js";
+import { ForgeFailed, testSpec } from "./smith.js";
 import type { ForgeEvent, ToolSpec } from "./types.js";
 
 // FORGE_PROVIDER=mock: replays a known-good forge with realistic pacing, so the
@@ -34,5 +34,7 @@ export async function mockForge(_request: string, onEvent: (e: ForgeEvent) => vo
   onEvent({ stage: "test", message: "Running 1 live test in the sandbox" });
   const report = await testSpec(WEATHER);
   onEvent({ stage: report.passed ? "ready" : "repair", message: report.passed ? `All tests passed for ${WEATHER.name}` : "Mock test failed" });
+  // The replay can't repair anything; a failed live test (e.g. the source is down) ends the build.
+  if (!report.passed) throw new ForgeFailed("Its live test failed, so I didn't keep it. The weather source may be busy; try again in a minute.");
   return { spec: WEATHER, report, attempts: 1 };
 }

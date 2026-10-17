@@ -59,11 +59,16 @@ try {
   check(learn.ms < 500 && /learn/i.test(learn.text), `forge_capability answers in ${learn.ms}ms (< 500ms) with text: "${learn.text.slice(0, 90)}"`);
   check(!learn.all?.some((m: any) => m.method === "elicitation/create"), "no elicitation sent to a client that didn't declare it");
 
-  let pending: { text: string; ms: number } = { text: "", ms: 0 };
-  for (let i = 0; i < 60 && !/needs your OK/i.test(pending.text); i++) {
+  // The user asks again before approving: the next answer carries the news, once.
+  let again = { text: "", ms: 0 };
+  for (let i = 0; i < 60 && !/Also tell the user/.test(again.text); i++) {
     await new Promise((r) => setTimeout(r, 500));
-    pending = await call("list_capabilities", {});
+    again = await call("use_skill", { name: "get_current_weather", input: { city: "Pune" } });
   }
+  check(/Also tell the user: I've finished learning "Current Weather" and it needs your OK/.test(again.text), `the next answer announces the finished skill: "${again.text.slice(again.text.indexOf("Also")).slice(0, 110)}"`);
+  check(!/Also tell the user/.test((await call("use_skill", { name: "get_current_weather", input: {} })).text), "the news is told only once per session");
+
+  const pending = await call("list_capabilities", {});
   check(/needs your OK/i.test(pending.text) && /open-meteo/.test(pending.text), `list_capabilities, as text, asks for consent and names the site (${pending.ms}ms)`);
   const id = /approve with id ([\w-]+)/.exec(pending.text)?.[1];
   check(!!id, `the approval id is in the text itself (${id})`);
@@ -72,7 +77,8 @@ try {
   check(approved.ms < 500 && /install/i.test(approved.text), `approve_capability answers in ${approved.ms}ms: "${approved.text.slice(0, 90)}"`);
 
   const used = await call("use_skill", { name: "get_current_weather", input: { city: "Delhi" } });
-  check(/degrees in Delhi/.test(used.text) && /Source: /.test(used.text), `use_skill answer is plain text with its source (${used.ms}ms, includes the live weather API): "${used.text}"`);
+  // A live public source can be overloaded; then the answer must say so plainly.
+  check((/degrees in Delhi/.test(used.text) && /Source: /.test(used.text)) || /^Open-Meteo isn't answering right now/.test(used.text), `use_skill answer is plain text with its source (${used.ms}ms, includes the live weather API): "${used.text}"`);
 
   const unknown = await rpc("tools/call", { name: "use_skill", arguments: { name: "no_such_skill", input: {} } });
   check(unknown.msg?.result?.isError === true, "unknown skill comes back as a tool error, not a crash");

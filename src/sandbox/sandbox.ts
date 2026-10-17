@@ -18,11 +18,29 @@ export interface SandboxJob {
   [key: string]: unknown;
 }
 
+/** The last request the source refused or failed, so a crash can be explained as "the source is down". */
+export interface UpstreamFailure {
+  host: string;
+  status: number;
+  reason: string;
+}
+
+/** A short reason from an error response body: its JSON reason/message/error, or its first words. */
+function reasonOf(base64: string): string {
+  const raw = Buffer.from(base64, "base64").toString("utf8").slice(0, 2000);
+  try {
+    const j = JSON.parse(raw);
+    for (const k of ["reason", "message", "error", "detail"]) if (typeof j?.[k] === "string") return j[k].slice(0, 120);
+  } catch {}
+  return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
 export interface SandboxOutput {
   ok: boolean;
   error?: string;
   logs: string;
   fetched: string[];
+  upstream?: UpstreamFailure;
   [key: string]: unknown;
 }
 
@@ -147,10 +165,16 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   const { child, out, closed } = runner;
   const fetched: string[] = [];
   let fetches = 0;
+  let upstream: UpstreamFailure | undefined;
   runner.onFetch = (req) => {
     const reply = (msg: object) => child.stdin.writable && child.stdin.write(JSON.stringify(msg) + "\n");
     if (++fetches > MAX_FETCHES) return void reply({ id: req.id, ok: false, code: "ELIMIT", error: `More than ${MAX_FETCHES} requests in one run` });
-    void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000)).then(reply);
+    void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000)).then((res) => {
+      if (res.ok && res.status >= 400) upstream = { host: new URL(res.url).hostname, status: res.status, reason: reasonOf(res.body) };
+      else if (!res.ok && res.code !== "ELIMIT") upstream = { host: new URL(req.url).hostname, status: 0, reason: res.error };
+      else upstream = undefined; // only the most recent request can explain a crash
+      reply(res);
+    });
   };
   child.stdin.write(JSON.stringify({ ...job, timeoutMs }) + "\n");
 
@@ -169,5 +193,6 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
     };
   }
   // The host's record of what was fetched, not the runner's.
-  return { ...(JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput), fetched };
+  const result = JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput;
+  return { ...result, fetched, ...(!result.ok && upstream ? { upstream } : {}) };
 }

@@ -13,6 +13,9 @@ net.setDefaultAutoSelectFamilyAttemptTimeout(2000);
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 const MAX_HOPS = 5;
+// Public APIs shed load with these; a GET is retried after a short pause.
+const BUSY = new Set([429, 502, 503, 504]);
+const RETRY_DELAYS_MS = [400, 1200];
 
 export interface RelayRequest {
   id: number;
@@ -110,7 +113,12 @@ export async function relayFetch(req: RelayRequest, allowed: string[], fetched: 
         throw new RelayError("EBLOCKED", `Blocked by Forge sandbox: ${url.hostname} is not in this tool's allowed domains (${allowed.join(", ") || "none"})`);
       }
       fetched.push(url.href);
-      const res = await once(url, method, headers, body, timeoutMs);
+      let res = await once(url, method, headers, body, timeoutMs);
+      for (const delay of method === "GET" || method === "HEAD" ? RETRY_DELAYS_MS : []) {
+        if (!BUSY.has(res.status)) break;
+        await new Promise((r) => setTimeout(r, delay));
+        res = await once(url, method, headers, body, timeoutMs);
+      }
       if (res.status >= 300 && res.status < 400 && res.location) {
         url = new URL(res.location, url);
         if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) [method, body] = ["GET", undefined];

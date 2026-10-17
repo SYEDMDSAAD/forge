@@ -41,6 +41,7 @@ const INSTRUCTIONS = `Forge lets this assistant learn new abilities while talkin
 - When the user asks for something none of your tools can do, and it could be answered from public information on the internet, say you'll learn it (e.g. "Give me a minute, I'll learn how") and call forge_capability with their request in their own words.
 - If forge_capability answers that it is still learning, tell the user and offer to check back; list_capabilities shows progress.
 - A skill that is built but waiting for the user's OK shows as pending in list_capabilities: say what it does and which sites it uses, ask the user, then call approve_capability.
+- When a Forge result says "Also tell the user", pass that news on: it is the outcome of something the user asked to be learned earlier.
 - To use a learned skill, call it directly if it is in your tool list, otherwise call use_skill with its name and input (list_capabilities shows each skill's input).
 Learned skills return a short \`speech\` string written to be spoken aloud.`;
 
@@ -52,6 +53,8 @@ interface ForgeJob {
   message: string;
   startedAt: string;
   capabilityId?: string;
+  /** The caller stopped waiting ("I'm learning that now"), so the outcome must be announced. */
+  background?: boolean;
 }
 const jobs = new Map<string, ForgeJob>();
 
@@ -64,6 +67,32 @@ function trackJob(request: string): ForgeJob {
 }
 
 const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+const consentText = (cap: Capability) =>
+  `It ${lowerFirst(cap.spec.description)} It will only access ${cap.spec.allowedDomains.join(", ")}. (approve with id ${cap.id})`;
+const readyText = (cap: Capability) => `"${cap.spec.title}" is ready and needs your OK. ${consentText(cap)}`;
+const learnedText = (cap: Capability) => `I've finished learning "${cap.spec.title}" and it needs your OK. ${consentText(cap)}`;
+
+/**
+ * Outcomes of background builds the user hasn't heard yet, for one session. A
+ * voice assistant only speaks tool results, so this news rides along with the
+ * next answer from any Forge tool; a session hears each item once.
+ */
+function newsFor(told: Set<string>): string[] {
+  const news: string[] = [];
+  for (const job of jobs.values()) {
+    if (!job.background || told.has(job.id)) continue;
+    const cap = job.capabilityId ? registry.get(job.capabilityId) : undefined;
+    if (job.status === "pending_approval" && cap?.status === "pending") news.push(learnedText(cap));
+    else if (job.status === "failed") news.push(`I couldn't learn "${job.request}": ${job.message}`);
+    else continue;
+    told.add(job.id);
+  }
+  return news;
+}
+
+/** Live sessions, told the moment a background build finishes (MCP log notice). */
+const announcers = new Set<(job: ForgeJob) => void>();
 
 const text = (t: string, structured?: Record<string, unknown>): CallToolResult => ({
   content: [{ type: "text", text: t }],
@@ -80,9 +109,15 @@ function sourcesOf(cap: Capability): string[] {
 async function runSkill(cap: Capability, input: Record<string, unknown>): Promise<CallToolResult> {
   const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
   registry.recordUse(cap.id);
+  const sources = sourcesOf(cap);
+  if (!out.ok && out.upstream) {
+    // The source is down or refusing, not the skill broken: say so in words a listener understands.
+    const why = out.upstream.reason ? ` (${lowerFirst(out.upstream.reason.replace(/\.$/, ""))})` : out.upstream.status ? ` (error ${out.upstream.status})` : "";
+    const speech = `${sources.join(" and ")} isn't answering right now${why}. Try again in a minute.`;
+    return { ...text(speech, { speech, unavailable: true, sources }), isError: true };
+  }
   if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
   const result = out.result as { speech: string; data?: unknown };
-  const sources = sourcesOf(cap);
   const cited = sources.some((s) => result.speech.toLowerCase().includes(s.toLowerCase()))
     ? result.speech
     : `${result.speech} Source: ${sources.join(" and ")}.`;
@@ -116,6 +151,7 @@ function summarize(cap: Capability) {
     tests: cap.testReport.results.map((r) => ({ name: r.name, passed: r.passed, ms: r.durationMs })),
     attempts: cap.attempts,
     uses: cap.uses,
+    request: cap.request,
     createdAt: cap.createdAt,
   };
 }
@@ -132,6 +168,16 @@ export function createServer(): McpServer {
     },
   );
   const forged = new Map<string, RegisteredTool>();
+  const told = new Set<string>();
+  const withNews = (result: CallToolResult): CallToolResult => {
+    const news = newsFor(told);
+    if (!news.length) return result;
+    return {
+      ...result,
+      content: [...result.content, { type: "text", text: `Also tell the user: ${news.join(" ")}` }],
+      ...(result.structuredContent ? { structuredContent: { ...result.structuredContent, news } } : {}),
+    };
+  };
 
   const installForged = (cap: Capability) => {
     forged.get(cap.spec.name)?.remove();
@@ -144,7 +190,7 @@ export function createServer(): McpServer {
         annotations: { readOnlyHint: true, openWorldHint: true },
         _meta: { "forge/capabilityId": cap.id, "forge/allowedDomains": cap.spec.allowedDomains },
       },
-      (input: Record<string, unknown>) => runSkill(cap, input),
+      async (input: Record<string, unknown>) => withNews(await runSkill(cap, input)),
     );
     forged.set(cap.spec.name, handle);
   };
@@ -157,9 +203,19 @@ export function createServer(): McpServer {
   };
   registry.on("activated", onActivated);
   registry.on("removed", onRemoved);
+  const announce = (job: ForgeJob) => {
+    const cap = job.capabilityId ? registry.get(job.capabilityId) : undefined;
+    const ready = job.status === "pending_approval" && cap;
+    const data = ready
+      ? { stage: "skill_ready", message: learnedText(cap), jobId: job.id, capability: summarize(cap) }
+      : { stage: "skill_failed", message: `I couldn't learn "${job.request}": ${job.message}`, jobId: job.id };
+    void mcp.server.sendLoggingMessage({ level: "notice", logger: "forge", data }).catch(() => {});
+  };
+  announcers.add(announce);
   mcp.server.onclose = () => {
     registry.off("activated", onActivated);
     registry.off("removed", onRemoved);
+    announcers.delete(announce);
   };
 
   const report = (extra: Extra) => {
@@ -303,13 +359,14 @@ export function createServer(): McpServer {
           setTimeout(() => {
             if (settled) return;
             detached = true;
+            job.background = true;
             void settle(
               "completed",
-              text(
+              withNews(text(
                 `I'm learning that now. It usually takes a minute or two. Tell the user, and check list_capabilities in a bit: ` +
                   `when the skill is ready it will need the user's OK before it's installed.`,
                 { status: "learning", jobId: job.id },
-              ),
+              )),
             );
           }, config.forgeWaitMs);
         }
@@ -322,6 +379,7 @@ export function createServer(): McpServer {
             job.message = e instanceof Error ? e.message : String(e);
             await settle("failed", { ...text(`Forge error: ${job.message}`), isError: true });
           }
+          if (job.background && (job.status === "pending_approval" || job.status === "failed")) for (const tell of announcers) tell(job);
         })();
         return { task };
       },
@@ -346,10 +404,12 @@ export function createServer(): McpServer {
       }
       registry.activate(id);
       for (const job of jobs.values()) if (job.capabilityId === id) job.status = "installed";
-      return text(`Installed "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request.`, {
-        status: "installed",
-        capability: summarize(cap),
-      });
+      return withNews(
+        text(`Installed "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request${cap.request ? `: "${cap.request}"` : ""}.`, {
+          status: "installed",
+          capability: summarize(cap),
+        }),
+      );
     },
   );
 
@@ -369,7 +429,7 @@ export function createServer(): McpServer {
       const cap = registry.byName(name);
       if (!cap) {
         const names = registry.active().map((c) => c.spec.name);
-        return { ...text(`No learned skill called "${name}". Learned skills: ${names.join(", ") || "none yet"}.`), isError: true };
+        return withNews({ ...text(`No learned skill called "${name}". Learned skills: ${names.join(", ") || "none yet"}.`), isError: true });
       }
       const parsed = inputSchemaFor(cap).safeParse(input);
       if (!parsed.success) {
@@ -378,7 +438,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-      return runSkill(cap, parsed.data as Record<string, unknown>);
+      return withNews(await runSkill(cap, parsed.data as Record<string, unknown>));
     },
   );
 
@@ -395,6 +455,7 @@ export function createServer(): McpServer {
       const pending = registry.pending().map(summarize);
       const learning = [...jobs.values()].filter((j) => j.status === "learning");
       const failed = [...jobs.values()].filter((j) => j.status === "failed");
+      newsFor(told); // everything below covers it
 
       const parts: string[] = [];
       parts.push(
@@ -402,9 +463,7 @@ export function createServer(): McpServer {
           ? `I've learned ${skills.length} skill${skills.length > 1 ? "s" : ""}: ${skills.map((c) => c.title).join(", ")}.`
           : "I haven't learned any new skills yet.",
       );
-      for (const p of pending) {
-        parts.push(`"${p.title}" is ready and needs your OK. It ${lowerFirst(p.description)} It will only access ${p.allowedDomains.join(", ")}. (approve with id ${p.id})`);
-      }
+      for (const p of registry.pending()) parts.push(readyText(p));
       for (const j of learning) parts.push(`Still learning "${j.request}": ${j.message}.`);
       for (const j of failed.slice(-2)) parts.push(`Couldn't learn "${j.request}": ${j.message}`);
       return text(parts.join(" "), { skills, pending, learning, failed });
@@ -423,7 +482,7 @@ export function createServer(): McpServer {
       const cap = registry.byName(name);
       if (!cap) return { ...text(`No learned skill called ${name}.`), isError: true };
       registry.remove(cap.id);
-      return text(`Forgot "${cap.spec.title}".`, { status: "removed" });
+      return withNews(text(`Forgot "${cap.spec.title}".`, { status: "removed" }));
     },
   );
 

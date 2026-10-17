@@ -148,23 +148,22 @@ function buildEnd(ok: boolean, text: string) {
   $("spinner").className = `spinner ${ok ? "done" : "fail"}`;
 }
 
-// ---------- consent (MCP elicitation) ----------
+// ---------- consent ----------
 
-client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult> => {
-  const cap = (req.params._meta?.["forge/capability"] ?? null) as Skill | null;
-  buildStep("Waiting for your OK", "wait");
+/** Shows the consent card, says it aloud, and resolves with the user's choice. */
+async function consentCard(cap: Skill | null, message: string, intro = "I've learned a new skill"): Promise<boolean> {
   const node = ($<HTMLTemplateElement>("consent-tpl").content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLElement;
   node.querySelector(".card-title")!.textContent = cap?.title ?? "New skill";
-  node.querySelector(".card-body")!.textContent = cap?.description ?? req.params.message;
+  node.querySelector(".card-body")!.textContent = cap?.description ?? message;
   const domains = node.querySelector(".domains")!;
   for (const d of cap?.allowedDomains ?? []) domains.append(el("li", undefined, d));
   if (cap) {
     const passed = cap.tests.filter((t) => t.passed).length;
     const checked = cap.crossChecked && cap.sources?.length ? `, answer cross-checked against ${cap.sources.join(" and ")}` : "";
-    node.querySelector(".tests")!.textContent = `✓ Passed ${passed}/${cap.tests.length} live tests in the sandbox${checked}`;
+    node.querySelector(".tests")!.textContent = `${passed === cap.tests.length ? "✓" : "✗"} Passed ${passed}/${cap.tests.length} live tests in the sandbox${checked}`;
   }
   addCard(node);
-  speak(`I've learned a new skill: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);
+  speak(`${intro}: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);
 
   const install = await new Promise<boolean>((resolve) => {
     node.querySelector<HTMLButtonElement>(".yes")!.onclick = () => resolve(true);
@@ -172,8 +171,30 @@ client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult>
   });
   for (const b of node.querySelectorAll("button")) b.disabled = true;
   node.querySelector(install ? ".yes" : ".no")!.textContent = install ? "Installed" : "Declined";
-  return { action: "accept", content: { install } };
+  return install;
+}
+
+// Asked by the server (MCP elicitation) inside a build this page started.
+client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult> => {
+  buildStep("Waiting for your OK", "wait");
+  const cap = (req.params._meta?.["forge/capability"] ?? null) as Skill | null;
+  return { action: "accept", content: { install: await consentCard(cap, req.params.message) } };
 });
+
+// A build that finished in the background, e.g. one a voice assistant started and
+// stopped waiting for: the server announces it to every connected client.
+async function onSkillReady(cap: Skill & { request?: string }, message: string) {
+  const install = await consentCard(cap, message, "Good news! I've finished learning a new skill");
+  const res = (await client.callTool({ name: "approve_capability", arguments: { id: cap.id, approve: install } })) as CallToolResult;
+  if (!install) return say("Okay, I've discarded it.");
+  if (res.isError) return say("That skill is no longer waiting for approval.");
+  await refresh(cap.name);
+  const skill = skills.find((s) => s.name === cap.name);
+  if (!skill || !cap.request) return;
+  addMsg("note", `Answering the earlier request: “${cap.request}”`);
+  const routed = await route(cap.request, skill);
+  if (routed) await useSkill(routed);
+}
 
 // ---------- skills & tools ----------
 
@@ -191,7 +212,9 @@ client.setNotificationHandler(ToolListChangedNotificationSchema, () => void refr
 let building = false;
 const STEP_KIND: Record<string, "" | "ok" | "bad"> = { repair: "bad", ready: "ok" };
 client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
-  const d = n.params.data as { stage?: string; message?: string } | undefined;
+  const d = n.params.data as { stage?: string; message?: string; capability?: Skill } | undefined;
+  if (n.params.logger === "forge" && d?.stage === "skill_ready" && d.capability) return void onSkillReady(d.capability, d.message ?? "").catch(() => {});
+  if (n.params.logger === "forge" && d?.stage === "skill_failed" && d.message) return void say(d.message);
   if (!building || n.params.logger !== "forge" || !d?.message) return;
   buildStep(d.message, STEP_KIND[d.stage ?? ""] ?? "");
 });
@@ -273,6 +296,7 @@ async function useSkill({ skill, input, missing }: Routed) {
     direct ? { name: skill.name, arguments: input } : { name: "use_skill", arguments: { name: skill.name, input } },
   )) as CallToolResult;
   const sc = res.structuredContent as { speech?: string; data?: unknown } | undefined;
+  if (res.isError && sc?.speech) return say(sc.speech); // e.g. the source is down right now
   if (res.isError || !sc?.speech) {
     say(`Sorry, ${skill.title} ran into a problem.`);
     addMsg("note", String((res.content[0] as { text?: string })?.text ?? "").slice(0, 300));
@@ -317,18 +341,29 @@ async function learn(utterance: string): Promise<Skill | undefined> {
   return undefined;
 }
 
+async function learnThenAnswer(utterance: string) {
+  try {
+    const learned = await learn(utterance);
+    const routed = learned && (await route(utterance, learned));
+    if (routed) await useSkill(routed);
+  } catch (e) {
+    building = false;
+    say("Sorry, something went wrong while I was learning that.");
+    addMsg("note", e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function ask(utterance: string) {
   if (busy || !utterance.trim()) return;
   busy = true;
   ring.className = "ring busy";
   addMsg("user", utterance);
   try {
-    let routed = await route(utterance);
-    if (!routed) {
-      const learned = await learn(utterance);
-      if (learned) routed = await route(utterance, learned);
-    }
+    const routed = await route(utterance);
     if (routed) await useSkill(routed);
+    else if (building) say("I'm still learning the last thing you asked. Ask me this again in a minute.");
+    // Learning runs in the background, so the conversation can go on meanwhile.
+    else void learnThenAnswer(utterance);
   } catch (e) {
     say("Sorry, something went wrong.");
     addMsg("note", e instanceof Error ? e.message : String(e));

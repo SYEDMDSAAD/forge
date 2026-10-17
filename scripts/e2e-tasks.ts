@@ -6,7 +6,7 @@ import { rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema, ElicitRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema, ElicitRequestSchema, LoggingMessageNotificationSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const dataDir = "data-e2e-tasks";
 rmSync(dataDir, { recursive: true, force: true });
@@ -33,8 +33,12 @@ async function connect(elicitation = true) {
   }
   let listChanged = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => void listChanged++);
+  const notices: { stage?: string; message?: string }[] = [];
+  client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
+    if (n.params.level === "notice") notices.push(n.params.data as { stage?: string; message?: string });
+  });
   await client.connect(new StreamableHTTPClientTransport(new URL("http://localhost:8798/mcp")));
-  return { client, prompts, listChanged: () => listChanged };
+  return { client, prompts, notices, listChanged: () => listChanged };
 }
 
 try {
@@ -67,7 +71,7 @@ try {
 
   // 2. Alexa-like client
   {
-    const { client, prompts } = await connect(false);
+    const { client, prompts, notices } = await connect(false);
     let t0 = performance.now();
     const res = await client.callTool({ name: "forge_capability", arguments: { request: "what's the weather in Pune" } });
     const ms = Math.round(performance.now() - t0);
@@ -82,6 +86,9 @@ try {
     console.log("  list_capabilities says:", (await client.callTool({ name: "list_capabilities", arguments: {} })).content[0].text);
     check(list.pending.length === 1, "skill waits as pending for the user's OK");
     check(prompts.length === 0, "no elicitation sent to a client without it");
+    await new Promise((r) => setTimeout(r, 300));
+    const ready = notices.find((n) => n.stage === "skill_ready");
+    check(!!ready && /finished learning/.test(ready.message ?? ""), `background build announced with a notice: "${ready?.message?.slice(0, 70)}"`);
 
     const approved = await client.callTool({ name: "approve_capability", arguments: { id: list.pending[0].id, approve: true } });
     check((approved.structuredContent as any)?.status === "installed", "approve_capability installs it");
