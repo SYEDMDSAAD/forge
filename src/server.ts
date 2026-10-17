@@ -105,6 +105,14 @@ function sourcesOf(cap: Capability): string[] {
   return [...new Set(cap.spec.allowedDomains.map((d) => d.split(".").slice(-2).join(".")))];
 }
 
+function ago(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min < 1) return "a moment ago";
+  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const h = Math.round(min / 60);
+  return `about ${h} hour${h === 1 ? "" : "s"} ago`;
+}
+
 /** Run a learned skill in a fresh sandbox runner; every answer names its source. */
 async function runSkill(cap: Capability, input: Record<string, unknown>): Promise<CallToolResult> {
   const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
@@ -118,15 +126,16 @@ async function runSkill(cap: Capability, input: Record<string, unknown>): Promis
   }
   if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
   const result = out.result as { speech: string; data?: unknown };
-  const cited = sources.some((s) => result.speech.toLowerCase().includes(s.toLowerCase()))
+  let cited = sources.some((s) => result.speech.toLowerCase().includes(s.toLowerCase()))
     ? result.speech
     : `${result.speech} Source: ${sources.join(" and ")}.`;
+  if (out.staleMs !== undefined) cited += ` ${sources.join(" and ")} isn't responding, so that's from ${ago(out.staleMs)}.`;
   return {
     content: [
       { type: "text", text: cited },
       ...(result.data !== undefined ? [{ type: "text" as const, text: JSON.stringify(result.data) }] : []),
     ],
-    structuredContent: { speech: cited, data: result.data ?? null, sources },
+    structuredContent: { speech: cited, data: result.data ?? null, sources, ...(out.staleMs !== undefined ? { staleSeconds: Math.round(out.staleMs / 1000) } : {}) },
   };
 }
 

@@ -41,4 +41,8 @@ export const config = {
   // Print raw model turns and tool results to stderr.
   debug: process.env.FORGE_DEBUG === "1",
   toolTimeoutMs: Number(process.env.FORGE_TOOL_TIMEOUT_MS ?? 15000),
+  // Reuse source replies while they are fresh (per the source's Cache-Control).
+  cache: process.env.FORGE_CACHE !== "0",
+  // When a source is down, answer from a reply up to this old, saying how old it is.
+  cacheMaxStaleMs: Number(process.env.FORGE_CACHE_MAX_STALE_MS ?? 2 * 60 * 60_000),
 };

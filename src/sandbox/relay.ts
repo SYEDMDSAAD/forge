@@ -6,6 +6,7 @@ import dns from "node:dns";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { config } from "../config.js";
 
 // Node gives each IPv6/IPv4 connect attempt 250ms by default; on high-latency
 // links (e.g. from India) that fails ~1 in 4 requests with ETIMEDOUT.
@@ -27,7 +28,7 @@ export interface RelayRequest {
 }
 
 export type RelayResponse =
-  | { id: number; ok: true; status: number; statusText: string; headers: [string, string][]; body: string; url: string; redirected: boolean }
+  | { id: number; ok: true; status: number; statusText: string; headers: [string, string][]; body: string; url: string; redirected: boolean; staleMs?: number }
   | { id: number; ok: false; code: string; error: string };
 
 class RelayError extends Error {
@@ -94,8 +95,92 @@ function once(url: URL, method: string, headers: Record<string, string>, body: B
   });
 }
 
-/** Perform one sandboxed fetch. Never throws: failures come back as `{ ok: false }`. */
-export async function relayFetch(req: RelayRequest, allowed: string[], fetched: string[], timeoutMs: number): Promise<RelayResponse> {
+// ---------- response cache ----------
+// Repeat questions skip the source, and when a source is down a skill can answer
+// from its last good reply (labelled with its age by the server). Freshness
+// follows each source's Cache-Control; a few that send none get a default.
+
+interface Cached {
+  status: number;
+  statusText: string;
+  headers: [string, string][];
+  body: string;
+  storedAt: number;
+  freshUntil: number;
+}
+const cache = new Map<string, Cached>();
+const MAX_ENTRIES = 500;
+const MAX_CACHED_BYTES = 1024 * 1024;
+const MAX_FRESH_MS = 60 * 60_000;
+// Send no Cache-Control, but their data only changes every 15 minutes or so.
+const DEFAULT_FRESH_MS: Record<string, number> = { "open-meteo.com": 10 * 60_000, "thespacedevs.com": 10 * 60_000 };
+
+const header = (headers: [string, string][], name: string) => headers.find(([k]) => k.toLowerCase() === name)?.[1];
+
+/** How long a response may be reused as fresh; undefined means it must not be stored at all. */
+function freshFor(host: string, headers: [string, string][]): number | undefined {
+  const cc = header(headers, "cache-control")?.toLowerCase();
+  if (cc?.includes("no-store") || cc?.includes("private")) return undefined;
+  if (cc?.includes("no-cache")) return 0;
+  const maxAge = cc && /max-age=(\d+)/.exec(cc);
+  if (maxAge) return Math.min(MAX_FRESH_MS, Math.max(0, (Number(maxAge[1]) - Number(header(headers, "age") ?? 0)) * 1000));
+  const known = Object.keys(DEFAULT_FRESH_MS).find((d) => host === d || host.endsWith("." + d));
+  return known ? DEFAULT_FRESH_MS[known] : 0;
+}
+
+function remember(key: string, res: Extract<RelayResponse, { ok: true }>) {
+  const freshMs = freshFor(new URL(res.url).hostname, res.headers);
+  if (freshMs === undefined || res.body.length > (MAX_CACHED_BYTES * 4) / 3) return;
+  const now = Date.now();
+  cache.delete(key);
+  cache.set(key, { status: res.status, statusText: res.statusText, headers: res.headers, body: res.body, storedAt: now, freshUntil: now + freshMs });
+  if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!);
+}
+
+function fromCache(id: number, key: string, hit: Cached, kind: "hit" | "stale"): RelayResponse {
+  const staleMs = kind === "stale" ? Date.now() - hit.storedAt : undefined;
+  return { id, ok: true, status: hit.status, statusText: hit.statusText, headers: [...hit.headers, ["x-forge-cache", kind]], body: hit.body, url: key, redirected: false, ...(staleMs !== undefined ? { staleMs } : {}) };
+}
+
+/** Failures that mean "the source is down or busy", as opposed to a request Forge refused. */
+function sourceFailed(res: RelayResponse): boolean {
+  if (res.ok) return BUSY.has(res.status) || res.status >= 500;
+  return !["EBLOCKED", "EPRIVATEADDR", "EPROTOCOL", "ELIMIT", "EREDIRECTS", "EBODYTOOLARGE"].includes(res.code);
+}
+
+/** Test hook: put a response in the cache as if it had been fetched `ageMs` ago. */
+export function seedCache(url: string, body: string, ageMs: number, freshMs = 0) {
+  const storedAt = Date.now() - ageMs;
+  cache.set(url, { status: 200, statusText: "OK", headers: [["content-type", "application/json"]], body: Buffer.from(body).toString("base64"), storedAt, freshUntil: storedAt + freshMs });
+}
+
+/**
+ * Perform one sandboxed fetch, through the cache for plain GETs. With `allowStale`
+ * (real use, not tests), a failing source is answered from its last good reply.
+ */
+export async function relayFetch(req: RelayRequest, allowed: string[], fetched: string[], timeoutMs: number, opts: { allowStale?: boolean } = {}): Promise<RelayResponse> {
+  const method = (req.method ?? "GET").toUpperCase();
+  const key = config.cache && method === "GET" && !req.body ? req.url : undefined;
+  if (key) {
+    const hit = cache.get(key);
+    const host = URL.canParse(key) ? new URL(key).hostname : "";
+    if (hit && Date.now() < hit.freshUntil && isAllowed(host, allowed)) {
+      fetched.push(key);
+      return fromCache(req.id, key, hit, "hit");
+    }
+  }
+  const res = await fetchUpstream(req, allowed, fetched, timeoutMs);
+  if (!key) return res;
+  if (res.ok && res.status === 200 && !res.redirected) remember(key, res);
+  else if (opts.allowStale && sourceFailed(res)) {
+    const old = cache.get(key);
+    if (old && Date.now() - old.storedAt <= config.cacheMaxStaleMs) return fromCache(req.id, key, old, "stale");
+  }
+  return res;
+}
+
+/** One fetch from the source itself. Never throws: failures come back as `{ ok: false }`. */
+async function fetchUpstream(req: RelayRequest, allowed: string[], fetched: string[], timeoutMs: number): Promise<RelayResponse> {
   try {
     let url = new URL(req.url);
     let method = (req.method ?? "GET").toUpperCase();

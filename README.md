@@ -126,6 +126,7 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 - **Static checks** before anything runs (no imports, `require`, `process`, `eval`, `new Function` or Node built-ins, also through comments). These catch honest mistakes early; the network-less container is the actual boundary.
 - **Time limits** per call and per test run.
 - **Busy sources**: a GET that gets 429/502/503/504 is retried twice with a short pause; if the source is still down, the user hears that in plain words (*"Open-Meteo isn't answering right now (the service is overloaded). Try again in a minute."*) instead of an error.
+- **Response cache** (in the relay, for plain GETs): a reply is reused while the source says it's fresh (its `Cache-Control`; 10 minutes for Open-Meteo and The Space Devs, which send none; never for sources that say `no-cache`, like the ISS position). Repeat questions skip the source (~70 ms instead of ~1 s). When a source is down, a skill in real use can answer from its last good reply up to 2 hours old, and the answer says so: *"…Source: Open-Meteo. Open-Meteo isn't responding, so that's from 14 minutes ago."* Skills being built and tested never get old data. `FORGE_CACHE=0` turns it off.
 - **Human consent** before any skill is installed, showing exactly which sites it will access.
 - **Answers you can check**: every answer names its source, and for numeric sources the live test cross-checks the numbers in the answer against the source itself (a hand-written reference check per source). This catches skills that read or compute a value wrongly, e.g. a currency conversion applied twice.
 - **No secrets**: skills only use keyless public sources. Requests that need a login, payment or private data are declined.
@@ -154,17 +155,20 @@ Known limitation: a skill's tests run inside its own sandbox, so deliberately ho
 | `FORGE_MAX_SUBMISSIONS` | `4` | Attempts the Smith gets to pass its tests |
 | `FORGE_MAX_TURNS` | `16` | Model turns per build |
 | `FORGE_TOOL_TIMEOUT_MS` | `15000` | Time limit per skill call |
+| `FORGE_CACHE` | on | `0` disables the response cache |
+| `FORGE_CACHE_MAX_STALE_MS` | `7200000` | Oldest reply used when a source is down (2 hours) |
 | `FORGE_DATA_DIR` | `data` | Where learned skills are stored |
 | `FORGE_DEBUG` | — | `1` prints raw model turns |
 
 ## Tests
 
 ```bash
-npm test                          # sandbox security attacks + the three end-to-end suites below
+npm test                          # sandbox security attacks, the three end-to-end suites and the cache check below
 npx tsx scripts/sandbox-security.ts # hostile-skill escape attempts; all must fail
 npx tsx scripts/e2e-tasks.ts      # task flow + Alexa-style flow against the mock smith (12 checks)
 npx tsx scripts/e2e-hotplug.ts    # approve -> tools/list_changed -> call -> remove
 npx tsx scripts/e2e-protocol-2025-03-26.ts  # an older-protocol client with no SDK, text only
+npx tsx scripts/cache-check.ts    # fresh replies reused, no-cache respected, down sources answered with their age
 npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains blocked
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)

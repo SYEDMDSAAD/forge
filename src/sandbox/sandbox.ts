@@ -41,6 +41,8 @@ export interface SandboxOutput {
   logs: string;
   fetched: string[];
   upstream?: UpstreamFailure;
+  /** Set when a down source was answered from the cache: age of the oldest reply used. */
+  staleMs?: number;
   [key: string]: unknown;
 }
 
@@ -166,10 +168,12 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   const fetched: string[] = [];
   let fetches = 0;
   let upstream: UpstreamFailure | undefined;
+  let staleMs: number | undefined;
   runner.onFetch = (req) => {
     const reply = (msg: object) => child.stdin.writable && child.stdin.write(JSON.stringify(msg) + "\n");
     if (++fetches > MAX_FETCHES) return void reply({ id: req.id, ok: false, code: "ELIMIT", error: `More than ${MAX_FETCHES} requests in one run` });
-    void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000)).then((res) => {
+    void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000), { allowStale: job.mode === "run" }).then((res) => {
+      if (res.ok && res.staleMs !== undefined) staleMs = Math.max(staleMs ?? 0, res.staleMs);
       if (res.ok && res.status >= 400) upstream = { host: new URL(res.url).hostname, status: res.status, reason: reasonOf(res.body) };
       else if (!res.ok && res.code !== "ELIMIT") upstream = { host: new URL(req.url).hostname, status: 0, reason: res.error };
       else upstream = undefined; // only the most recent request can explain a crash
@@ -194,5 +198,5 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   }
   // The host's record of what was fetched, not the runner's.
   const result = JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput;
-  return { ...result, fetched, ...(!result.ok && upstream ? { upstream } : {}) };
+  return { ...result, fetched, ...(!result.ok && upstream ? { upstream } : {}), ...(staleMs !== undefined ? { staleMs } : {}) };
 }
