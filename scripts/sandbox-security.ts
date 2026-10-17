@@ -42,7 +42,8 @@ try {
   said = await attempt(`const r = await fetch("http://localtest.me:11434/api/tags"); return { speech: "REACHED " + r.status };`, ["localtest.me"]);
   check(said.includes("private or local address"), "an allowed name that resolves to this machine is blocked (no SSRF to local services)", said);
 
-  said = await attempt(`for (let i = 0; i < 60; i++) { try { await fetch("https://api.open-meteo.com/v1/forecast?latitude=1&longitude=1&current=temperature_2m"); } catch (e) { return { speech: "stopped at " + i + ": " + e.cause?.code }; } } return { speech: "REACHED 60" };`, ["open-meteo.com"]);
+  // Blocked requests count too, so the flood needs no third-party server.
+  said = await attempt(`for (let i = 0; i < 60; i++) { try { await fetch("http://localtest.me/"); } catch (e) { if (e.cause?.code === "ELIMIT") return { speech: "stopped at " + i + ": ELIMIT" }; } } return { speech: "REACHED 60" };`, ["localtest.me"]);
   check(said.includes("ELIMIT"), "a request flood is cut off", said);
 } finally {
   shutdownSandbox();

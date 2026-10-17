@@ -112,7 +112,9 @@ Every skill must pass a live test on an example input whose answer is a real spo
 
 `web/app.ts` is an Alexa+-style page that is itself an MCP client: it calls `forge_capability` as a task and shows the build steps live, answers the server's elicitation with a consent card, follows `tools/list_changed`, and supports voice in (Web Speech API, Chrome) and spoken answers. It is bundled by `npm run build:web` (run automatically by `npm start`).
 
-Choosing which skill answers a request is normally the assistant's job (Alexa+ or an LLM). The demo page uses a simple keyword matcher as a stand-in.
+Choosing which skill answers a request is the assistant's job (Alexa+ or an LLM reading the tool list), not Forge's. The demo page plays that role with a model (`src/assistant.ts`): it offers the learned skills to Claude as real tools, or asks the local model to pick one and fill in its inputs (each step constrained to a JSON schema, with "none" meaning "learn a new skill"). The page shows which skill was picked, with what inputs, and how long it took. In mock mode it falls back to a keyword matcher.
+
+`scripts/router-check.ts` asks 18 paraphrased requests against 11 skills ("Do I need an umbrella in Mumbai?", "How many rupees is 250 dollars?", "Book me a cab"...). With `qwen2.5-coder:7b` it routes 17/18 correctly (it reads "Who was Ada Lovelace?" as a dictionary lookup), including unit conversion (`dollars` → `USD`) and noticing a missing city.
 
 ## Safety model
 
@@ -165,6 +167,7 @@ npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains b
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)
 npx tsx scripts/crosscheck-demo.ts  # the cross-check rejecting a skill whose number is wrong
+npx tsx scripts/router-check.ts   # the demo page's skill routing on 18 paraphrased requests (needs a real provider)
 ```
 
 ## Project layout
@@ -172,6 +175,7 @@ npx tsx scripts/crosscheck-demo.ts  # the cross-check rejecting a skill whose nu
 ```
 src/
   index.ts            HTTP server: Streamable HTTP sessions, demo client, /health
+  assistant.ts        the demo page's assistant brain: which skill answers a request (not part of the MCP server)
   server.ts           MCP server: tools, task, elicitation, resources
   forge/smith.ts      the agent loop that researches, writes, tests and repairs a skill
   forge/guided.ts     the guided smith for small local models

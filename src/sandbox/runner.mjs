@@ -63,7 +63,8 @@ const errorText = (e) => {
   const text = e && e.stack ? String(e.stack).split("\n").slice(0, 4).join("\n") : String(e);
   // fetch() hides the network reason ("fetch failed") in e.cause.
   const cause = e?.cause ? ` (cause: ${e.cause.code ?? e.cause.message ?? e.cause})` : "";
-  return text.replace(/^(.*)$/m, `$1${cause}`);
+  // Stack frames name the module by its data: URL; keep only line:column.
+  return text.replace(/^(.*)$/m, `$1${cause}`).replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g, "skill.js");
 };
 
 async function loadTool(code) {

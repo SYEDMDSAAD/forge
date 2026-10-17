@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { route } from "./assistant.js";
 import { config } from "./config.js";
 import { warmSandbox } from "./sandbox/sandbox.js";
 import { createServer, markTaskCall, registry } from "./server.js";
@@ -49,6 +50,21 @@ app.get("/mcp", bySession);
 app.delete("/mcp", bySession);
 
 // Demo client (web/app.ts, built with `npm run build:web`).
+// The demo page's assistant brain: picks which learned skill answers a request (src/assistant.ts).
+app.post("/assistant/route", async (req: Request, res: Response) => {
+  const { utterance, skills, only } = req.body ?? {};
+  if (typeof utterance !== "string" || !Array.isArray(skills)) {
+    res.status(400).json({ error: "utterance and skills are required" });
+    return;
+  }
+  try {
+    res.json((await route(utterance.slice(0, 500), skills.slice(0, 100), typeof only === "string" ? only : undefined)) ?? { fallback: true });
+  } catch (e) {
+    console.error("route failed:", e);
+    res.json({ fallback: true });
+  }
+});
+
 app.use(express.static(fileURLToPath(new URL("../web/public", import.meta.url))));
 
 app.get("/health", (_req, res) => {

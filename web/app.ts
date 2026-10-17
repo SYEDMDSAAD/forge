@@ -197,8 +197,9 @@ client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
 });
 
 // ---------- routing ----------
-// Stand-in for the assistant's own reasoning (Alexa+ or an LLM does this in
-// production): match the request to a learned skill and pull out its inputs.
+// Deciding which skill answers a request is the assistant's job (Alexa+ or an
+// LLM reading the tool list). The page asks a model for it (src/assistant.ts);
+// without one (mock provider) it falls back to this keyword matcher.
 
 const STOP = new Set("a an and are can could does for from get give how is it its me my now of on please right show tell that the this to was what whats what's when where which who will with would you your yet today".split(" "));
 const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s']/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
@@ -234,10 +235,35 @@ function extractInput(utterance: string, skill: Skill): { input: Record<string, 
   return { input, missing };
 }
 
+interface Routed {
+  skill: Skill;
+  input: Record<string, unknown>;
+  missing: string[];
+}
+
+/** Which skill answers `utterance`, with what inputs. With `only`, just fills that skill's inputs. */
+async function route(utterance: string, only?: Skill): Promise<Routed | undefined> {
+  type Reply = { fallback?: true; skill?: string | null; input?: Record<string, unknown>; missing?: string[]; by?: string; ms?: number };
+  const r: Reply = await fetch("/assistant/route", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ utterance, skills: only ? [only] : skills, only: only?.name }),
+  })
+    .then((res) => res.json())
+    .catch(() => ({ fallback: true }));
+  if (r.fallback) {
+    const skill = only ?? match(utterance);
+    return skill && { skill, ...extractInput(utterance, skill) };
+  }
+  const skill = skills.find((s) => s.name === r.skill);
+  const took = `${((r.ms ?? 0) / 1000).toFixed(1)} s`;
+  addMsg("note", skill ? `${r.by} picked ${skill.name} ${JSON.stringify(r.input)} in ${took}` : `${r.by}: no learned skill fits (${took})`);
+  return skill && { skill, input: r.input ?? {}, missing: r.missing ?? [] };
+}
+
 // ---------- the conversation ----------
 
-async function useSkill(skill: Skill, utterance: string) {
-  const { input, missing } = extractInput(utterance, skill);
+async function useSkill({ skill, input, missing }: Routed) {
   if (missing.length) {
     say(`I can do that with ${skill.title}, but I need the ${missing.join(" and ")}.`);
     return;
@@ -257,7 +283,8 @@ async function useSkill(skill: Skill, utterance: string) {
   void refresh();
 }
 
-async function learn(utterance: string): Promise<boolean> {
+/** Builds a skill for `utterance`; returns it once installed. */
+async function learn(utterance: string): Promise<Skill | undefined> {
   say("I can't do that yet. Give me a minute — I'll learn how.");
   buildBegin(utterance);
   building = true;
@@ -271,14 +298,14 @@ async function learn(utterance: string): Promise<boolean> {
     else if (msg.type === "error") {
       buildEnd(false, msg.error.message);
       say("Something went wrong while I was learning that.");
-      return false;
+      return undefined;
     }
   }
   const sc = result?.structuredContent as { status?: string; reason?: string; capability?: Skill } | undefined;
   if (sc?.status === "installed") {
     buildEnd(true, `Installed ${sc.capability?.name ?? "the skill"}`);
     await refresh(sc.capability?.name);
-    return true;
+    return skills.find((s) => s.name === sc.capability?.name);
   }
   if (sc?.status === "declined") {
     buildEnd(false, "Not installed");
@@ -287,7 +314,7 @@ async function learn(utterance: string): Promise<boolean> {
     buildEnd(false, sc?.reason ?? "Couldn't build it");
     say(sc?.reason ?? "I couldn't learn that one, sorry.");
   }
-  return false;
+  return undefined;
 }
 
 async function ask(utterance: string) {
@@ -296,9 +323,12 @@ async function ask(utterance: string) {
   ring.className = "ring busy";
   addMsg("user", utterance);
   try {
-    let skill = match(utterance);
-    if (!skill && (await learn(utterance))) skill = match(utterance) ?? skills.at(-1);
-    if (skill) await useSkill(skill, utterance);
+    let routed = await route(utterance);
+    if (!routed) {
+      const learned = await learn(utterance);
+      if (learned) routed = await route(utterance, learned);
+    }
+    if (routed) await useSkill(routed);
   } catch (e) {
     say("Sorry, something went wrong.");
     addMsg("note", e instanceof Error ? e.message : String(e));

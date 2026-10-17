@@ -28,3 +28,33 @@ export function fallbackParams(): Pick<Anthropic.Beta.MessageCreateParams, "beta
   if (config.provider !== "anthropic") return {};
   return { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
 }
+
+/** One structured reply from Ollama's native chat API, streamed so long CPU generations don't hit HTTP timeouts. */
+export async function askOllama<T>(system: string, user: string, schema: object, temperature = 0.2): Promise<T> {
+  const res = await fetch(`${config.ollamaUrl}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: config.model,
+      stream: true,
+      format: schema,
+      options: { num_ctx: config.ollamaContext, temperature },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok || !res.body) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
+  let text = "";
+  let buffered = "";
+  for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
+    buffered += chunk;
+    const lines = buffered.split("\n");
+    buffered = lines.pop()!;
+    for (const line of lines) if (line.trim()) text += JSON.parse(line).message?.content ?? "";
+  }
+  if (buffered.trim()) text += JSON.parse(buffered).message?.content ?? "";
+  if (config.debug) console.error("[debug] guided reply:", text.slice(0, 3000));
+  return JSON.parse(text) as T;
+}

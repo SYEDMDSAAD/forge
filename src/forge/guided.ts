@@ -4,6 +4,7 @@
 // template -> repair from test failures. Every reply is constrained to a JSON
 // schema by Ollama, so a 7B model can't wander off or send malformed calls.
 import { config } from "../config.js";
+import { askOllama as ask } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
 import { CATALOG, catalogById, type Source } from "./catalog.js";
 import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
@@ -96,36 +97,6 @@ function speechProblems(result: unknown, request: string): string[] {
   if (/\d\.\d{3,}/.test(r.speech)) p.push("round the numbers in speech (Math.round, or toFixed(1) for small values)");
   if (r.speech.toLowerCase().includes(questionOf(request))) p.push("speech repeats the user's question; say only the answer");
   return p;
-}
-
-/** One structured reply from Ollama's native chat API, streamed so long CPU generations don't hit HTTP timeouts. */
-async function ask<T>(system: string, user: string, schema: object, temperature = 0.2): Promise<T> {
-  const res = await fetch(`${config.ollamaUrl}/api/chat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: config.model,
-      stream: true,
-      format: schema,
-      options: { num_ctx: config.ollamaContext, temperature },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!res.ok || !res.body) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
-  let text = "";
-  let buffered = "";
-  for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
-    buffered += chunk;
-    const lines = buffered.split("\n");
-    buffered = lines.pop()!;
-    for (const line of lines) if (line.trim()) text += JSON.parse(line).message?.content ?? "";
-  }
-  if (buffered.trim()) text += JSON.parse(buffered).message?.content ?? "";
-  if (config.debug) console.error("[debug] guided reply:", text.slice(0, 3000));
-  return JSON.parse(text) as T;
 }
 
 const SYSTEM = "You build small, reliable tools for a voice assistant. Reply only with JSON matching the given schema.";
