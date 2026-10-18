@@ -140,6 +140,8 @@ The folder has no dependency on Forge, a model or a sandbox:
 
 Choosing which skill answers a request is the assistant's job (Alexa+ or an LLM reading the tool list), not Forge's. The demo page plays that role with a model (`src/assistant.ts`): it offers the learned skills to Claude as real tools, or asks the local model to pick one and fill in its inputs (each step constrained to a JSON schema, with "none" meaning "learn a new skill"). The page shows which skill was picked, with what inputs, and how long it took. In mock mode it falls back to a keyword matcher.
 
+The page speaks with a natural neural voice, [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, Apache-2.0), which the Forge server runs on the CPU (`src/voice.ts`, a 330 MB download the first time; full precision is twice as fast as the quantized model on a CPU). Pick from five voices next to "Speak answers". Answers are spoken one sentence at a time, the next made while the current one plays, so speech starts in about 1 s. Until the voice has loaded, or with `FORGE_VOICE=0`, the page uses the browser's best built-in voice. On Alexa+, Alexa speaks Forge's answers in its own voice.
+
 `scripts/router-check.ts` asks 18 paraphrased requests against 11 skills ("Do I need an umbrella in Mumbai?", "How many rupees is 250 dollars?", "Book me a cab"...). With `qwen2.5-coder:7b` it routes 17/18 correctly (it reads "Who was Ada Lovelace?" as a dictionary lookup), including unit conversion (`dollars` → `USD`) and noticing a missing city.
 
 ## Safety model
@@ -182,6 +184,7 @@ Known limitation: a skill's tests run inside its own sandbox, so deliberately ho
 | `FORGE_TOOL_TIMEOUT_MS` | `15000` | Time limit per skill call |
 | `FORGE_CACHE` | on | `0` disables the response cache |
 | `FORGE_CACHE_MAX_STALE_MS` | `7200000` | Oldest reply used when a source is down (2 hours) |
+| `FORGE_VOICE` | `1` | `0` turns off the demo page's natural voice (it then uses the browser's voice) |
 | `FORGE_DATA_DIR` | `data` | Where learned skills are stored |
 | `FORGE_DEBUG` | — | `1` prints raw model turns |
 
@@ -208,6 +211,7 @@ npx tsx scripts/router-check.ts   # the demo page's skill routing on 18 paraphra
 src/
   index.ts            HTTP server: Streamable HTTP sessions, demo client, /health
   assistant.ts        the demo page's assistant brain: which skill answers a request (not part of the MCP server)
+  voice.ts            the demo page's natural voice (Kokoro on the CPU; not part of the MCP server)
   server.ts           MCP server: tools, task, elicitation, resources
   forge/smith.ts      the agent loop that researches, writes, tests and repairs a skill
   forge/guided.ts     the guided smith for small local models

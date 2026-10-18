@@ -75,6 +75,8 @@ button, input { font: inherit; color: inherit; }
 .mic.on { background: var(--ok); color: #04121c; }
 .send { padding: 0 18px; background: var(--accent); color: #04121c; font-weight: 650; }
 .voice { margin-top: 8px; font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.voice label { display: flex; gap: 6px; align-items: center; }
+.voice select { background: var(--panel-2); color: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font: inherit; }
 
 .forge { border-left: 1px solid var(--line); background: rgba(17,26,46,.6); padding: 16px 20px; overflow-y: auto; }
 .forge h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }

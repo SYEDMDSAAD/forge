@@ -23,7 +23,11 @@
         <input id="say" autocomplete="off" placeholder="Ask anything… e.g. What's the weather in Pune right now?" />
         <button type="submit" class="send">Ask</button>
       </form>
-      <label class="voice"><input type="checkbox" id="speak" checked /> Speak answers</label>
+      <div class="voice">
+        <label><input type="checkbox" id="speak" checked /> Speak answers</label>
+        <select id="voice" title="Voice"></select>
+        <span id="voiceStatus"></span>
+      </div>
     </section>
 
     <aside class="forge">

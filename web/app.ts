@@ -12,6 +12,7 @@ import {
   type ElicitResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { setupVoice, speak, stopSpeaking } from "./voice.js";
 
 interface Skill {
   id: string;
@@ -91,14 +92,6 @@ function answerCard(skill: Skill | undefined, speech: string, data: unknown) {
     if (dl.childElementCount) card.append(dl);
   }
   addCard(card);
-}
-
-function speak(text: string) {
-  if (!$<HTMLInputElement>("speak").checked || !("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.05;
-  speechSynthesis.speak(u);
 }
 
 function say(text: string) {
@@ -392,6 +385,7 @@ if (!SR) {
   let rec: Recognition | undefined;
   mic.onclick = () => {
     if (rec) return rec.stop();
+    stopSpeaking();
     rec = new SR() as Recognition;
     rec.lang = "en-IN";
     rec.interimResults = true;
@@ -414,6 +408,11 @@ if (!SR) {
     rec.start();
   };
 }
+
+// ---------- voice out ----------
+
+setupVoice({ picker: $<HTMLSelectElement>("voice"), status: $("voiceStatus"), enabled: () => $<HTMLInputElement>("speak").checked });
+$<HTMLInputElement>("speak").addEventListener("change", (e) => (e.target as HTMLInputElement).checked || stopSpeaking());
 
 // ---------- start ----------
 

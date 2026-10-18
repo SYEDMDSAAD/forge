@@ -23,7 +23,7 @@ writeFileSync(`data/capabilities/${id}.json`, JSON.stringify({
 }));
 
 const { spawn } = await import("node:child_process");
-const server = spawn("npx", ["tsx", "src/index.ts"], { env: { ...process.env, PORT: "8799" }, stdio: ["ignore", "pipe", "inherit"], detached: true });
+const server = spawn("npx", ["tsx", "src/index.ts"], { env: { ...process.env, PORT: "8799", FORGE_VOICE: "0" }, stdio: ["ignore", "pipe", "inherit"], detached: true });
 await new Promise((r) => server.stdout!.on("data", (d) => String(d).includes("Forge MCP") && r(null)));
 
 const client = new Client({ name: "e2e", version: "1" });

@@ -11,7 +11,7 @@ import { CallToolResultSchema, ElicitRequestSchema, LoggingMessageNotificationSc
 const dataDir = "data-e2e-tasks";
 rmSync(dataDir, { recursive: true, force: true });
 const server = spawn("npx", ["tsx", "src/index.ts"], {
-  env: { ...process.env, PORT: "8798", FORGE_PROVIDER: "mock", FORGE_MOCK_OFFLINE: "1", FORGE_DATA_DIR: dataDir, FORGE_MOCK_PACE_MS: "300" },
+  env: { ...process.env, PORT: "8798", FORGE_PROVIDER: "mock", FORGE_MOCK_OFFLINE: "1", FORGE_VOICE: "0", FORGE_DATA_DIR: dataDir, FORGE_MOCK_PACE_MS: "300" },
   stdio: ["ignore", "pipe", "inherit"],
   detached: true,
 });

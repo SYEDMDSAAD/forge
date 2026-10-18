@@ -8,6 +8,7 @@ import { route } from "./assistant.js";
 import { config } from "./config.js";
 import { warmSandbox } from "./sandbox/sandbox.js";
 import { createServer, markTaskCall, registry } from "./server.js";
+import { loadVoice, synthesize, VOICE_IDS, voiceState } from "./voice.js";
 
 const app = createMcpExpressApp();
 const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -65,6 +66,32 @@ app.post("/assistant/route", async (req: Request, res: Response) => {
   }
 });
 
+// The demo page's natural voice (src/voice.ts): one sentence in, a WAV out.
+app.get("/voice/status", (_req, res) => {
+  res.json(config.voice ? voiceState : { ready: false, failed: true });
+});
+app.post("/voice", async (req: Request, res: Response) => {
+  const { text, voice } = req.body ?? {};
+  if (!config.voice || !voiceState.ready) {
+    res.status(503).end();
+    return;
+  }
+  if (typeof text !== "string" || !text.trim() || text.length > 600 || !VOICE_IDS.includes(voice)) {
+    res.status(400).end();
+    return;
+  }
+  let gone = false;
+  res.on("close", () => (gone = !res.writableFinished));
+  try {
+    const wav = await synthesize(text, voice, () => !gone);
+    if (wav) res.type("audio/wav").send(Buffer.from(wav));
+    else res.status(204).end();
+  } catch (e) {
+    console.error("voice failed:", e);
+    res.status(500).end();
+  }
+});
+
 app.use(express.static(fileURLToPath(new URL("../web/public", import.meta.url))));
 
 app.get("/health", (_req, res) => {
@@ -72,6 +99,7 @@ app.get("/health", (_req, res) => {
 });
 
 warmSandbox();
+if (config.voice) void loadVoice().catch(() => {});
 app.listen(config.port, () => {
   console.log(`Forge MCP server on http://localhost:${config.port}/mcp, demo client on http://localhost:${config.port}/ (${config.provider}/${config.model}, sandbox=${config.sandbox})`);
 });

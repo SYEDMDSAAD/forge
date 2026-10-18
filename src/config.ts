@@ -43,6 +43,8 @@ export const config = {
   toolTimeoutMs: Number(process.env.FORGE_TOOL_TIMEOUT_MS ?? 15000),
   // Reuse source replies while they are fresh (per the source's Cache-Control).
   cache: process.env.FORGE_CACHE !== "0",
+  /** Natural voice for the demo page (downloads a 330 MB model once). */
+  voice: process.env.FORGE_VOICE !== "0",
   // When a source is down, answer from a reply up to this old, saying how old it is.
   cacheMaxStaleMs: Number(process.env.FORGE_CACHE_MAX_STALE_MS ?? 2 * 60 * 60_000),
 };
