@@ -241,6 +241,18 @@ function describeFailure(report: TestReport, request: string, spec: ToolSpec): s
     .join("\n");
 }
 
+/**
+ * The code works (its second test, with other values, passed) but the source has
+ * nothing for the user's own values: rewriting the code can't help, so say so now.
+ */
+function inputProblem(report: TestReport, spec: ToolSpec, src: Source): void {
+  const [mine, other] = report.results;
+  const said = (mine?.result as { speech?: string } | undefined)?.speech ?? "";
+  if (!mine || mine.passed || !other?.passed || (!new RegExp(NOTHING, "i").test(said) && !/wasn.?t found|couldn.?t find|not on /i.test(said))) return;
+  const asked = Object.values(spec.tests[0].input).filter((v) => typeof v === "string" && v.trim()).join(" and ");
+  throw new ForgeFailed(`${src.name} has nothing for "${asked}". Try asking about one thing at a time, by its name: for example "What is an API?"`);
+}
+
 /** What the live test asked and answered, and what the cross-check compared, for the build log. */
 function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent: (e: ForgeEvent) => void) {
   const r = report.results[0];
@@ -278,18 +290,35 @@ async function generalTool(request: string, plan: Plan, tool: NonNullable<Source
       "You extract the values a request names.",
       `The user asked: "${request}"\n\nFor each field give the value from the request${tool.inputs.some((i) => i.optional) ? ", or an empty string when the user didn't name it" : ""}${
         strict ? ". Copy the user's own words exactly" : ""
-      }:\n${tool.inputs.map(field).join("\n")}`,
+      }${tool.inputs.filter((i) => i.fromRequest).length > 1 ? ". If the user asks about two things, put the second one in the second field" : ""}:\n${tool.inputs.map(field).join("\n")}`,
       { type: "object", properties: Object.fromEntries(tool.inputs.map((i) => [i.name, { type: "string" }])), required: tool.inputs.map((i) => i.name) },
       0,
     );
-  // A topic or city the user didn't say (no word of it is in the request) was made up.
+  // A topic or city the user didn't say was made up: none of its words is in the request,
+  // and it isn't what the user's abbreviation stands for (OOP → Object-Oriented Programming).
   const words = request.toLowerCase();
-  const madeUp = (v: Record<string, string>) =>
-    tool.inputs.some((i) => i.fromRequest && v[i.name]?.trim() && !v[i.name].toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 1 && words.includes(w)));
+  const said = (value: string) => {
+    const parts = value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const initials = parts.map((w) => w[0]).join("");
+    return parts.some((w) => w.length > 1 && words.includes(w)) || (initials.length > 1 && new RegExp(`\\b${initials}\\b`).test(words));
+  };
+  const madeUp = (v: Record<string, string>) => tool.inputs.some((i) => i.fromRequest && v[i.name]?.trim() && !said(v[i.name]));
+  // A whole sentence is not a topic or a city ("what are the main four pillars of the OOP and what is API").
+  const tooLong = (v: Record<string, string>) => tool.inputs.some((i) => i.fromRequest && (v[i.name] ?? "").trim().split(/\s+/).length > 6);
+  const short = () =>
+    ask<Record<string, string>>(
+      "You extract the values a request names.",
+      `The user asked: "${request}"\n\nGive each field as a short name of one to four words (like a Wikipedia article title or a city name), never a sentence or a question.${
+        tool.inputs.filter((i) => i.fromRequest).length > 1 ? " If the user asks about two things, put the second one in the second field." : ""
+      }${tool.inputs.some((i) => i.optional) ? " Use an empty string for a field the user didn't name." : ""}\n${tool.inputs.map(field).join("\n")}`,
+      { type: "object", properties: Object.fromEntries(tool.inputs.map((i) => [i.name, { type: "string" }])), required: tool.inputs.map((i) => i.name) },
+      0,
+    );
   let values = !tool.inputs.length ? {} : await extract(false);
+  if (tooLong(values)) values = await short();
   if (madeUp(values)) values = await extract(true);
-  if (madeUp(values))
-    values = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, tool.inputs.find((i) => i.name === k)?.fromRequest && !v.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 1 && words.includes(w)) ? "" : v]));
+  if (tooLong(values)) values = await short();
+  if (madeUp(values)) values = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, tool.inputs.find((i) => i.name === k)?.fromRequest && !said(v) ? "" : v]));
   Object.assign(plan, {
     name: tool.name,
     title: tool.title,
@@ -297,7 +326,9 @@ async function generalTool(request: string, plan: Plan, tool: NonNullable<Source
     inputs: tool.inputs.map((i) => {
       const raw = codeOf(values[i.name]?.trim() ?? "", i.description);
       const said = i.generic && isGeneric(raw) ? "" : raw;
-      const example = i.type === "number" ? String(Number(said.replace(/[^0-9.]/g, "")) || 1) : said || (i.optional ? "" : request);
+      // With nothing extracted, the request itself is only a usable value when it is short.
+      const fallback = i.optional || request.trim().split(/\s+/).length > 6 ? "" : request;
+      const example = i.type === "number" ? String(Number(said.replace(/[^0-9.]/g, "")) || 1) : said || fallback;
       const another = i.another.find((a) => a.toLowerCase() !== example.toLowerCase());
       return { name: i.name, type: i.type ?? "string", description: i.description, example, another_example: another, optional: i.optional };
     }),
@@ -360,6 +391,7 @@ ${known(src.id)}Design a reusable tool: a snake_case verb name (like get_air_qua
         return { spec, report, attempts: 1 };
       }
       const why = describeFailure(report, request, spec).split("\n").find((l) => l.trim() && !l.startsWith("Test with input"))?.replace(/^- /, "") ?? "";
+      inputProblem(report, spec, src);
       onEvent({ stage: "repair", message: `The saved code didn't pass this time (${why.slice(0, 120)}); writing new code` });
     }
   }
@@ -431,6 +463,7 @@ ${evidence}`;
         ));
         continue;
       }
+      inputProblem(report, spec, src);
       failure = `The live test failed:\n${describeFailure(report, request, spec)}`;
       onEvent({ stage: "repair", message: `Test failed: ${failure.split("\n")[2]?.replace(/^- /, "").slice(0, 80) ?? "fixing"}` });
     }

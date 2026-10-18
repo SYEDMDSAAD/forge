@@ -332,10 +332,10 @@ Speech: "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpp
     tool: {
       name: "explain_topic",
       title: "Explain from Wikipedia",
-      description: "Explains a person, place, event, idea or concept from its Wikipedia summary, or compares two of them (merge sort and quicksort, Delhi and Mumbai).",
+      description: "Explains a person, place, event, idea or concept from its Wikipedia summary, or two of them at once, to compare them or answer a two-part question (merge sort and quicksort, OOP and API).",
       inputs: [
         { name: "topic", fromRequest: true, description: "what to explain, as a Wikipedia article name, e.g. Quicksort or Ada Lovelace", another: ["Binary search", "Taj Mahal"] },
-        { name: "compare_with", fromRequest: true, description: "a second topic, only when the user asks to compare or for a difference; leave out otherwise", optional: true, another: ["Bubble sort", "Red Fort"] },
+        { name: "compare_with", fromRequest: true, description: "a second topic, when the user asks to compare two things or asks about two things at once; leave out otherwise", optional: true, another: ["Bubble sort", "Red Fort"] },
       ],
     },
     endpoints: [
