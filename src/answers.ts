@@ -70,7 +70,8 @@ export function emergency(utterance: string): string | undefined {
   // "What is a heart attack?" asks for an explanation; "my father has chest pain" is happening now.
   if (!happeningNow(utterance)) return undefined;
   if (MEDICAL.test(utterance))
-    return "This could be an emergency. Please call 112, or 108 for an ambulance, right now. Stay with the person, keep them still and comfortable, and follow what the operator tells you.";
+    // No first-aid steps of our own: what's right depends on the person (someone not breathing needs CPR), so the operator says.
+    return "This could be an emergency. Please call 112, or 108 for an ambulance, right now, and stay on the line: the operator will tell you exactly what to do until help arrives.";
   if (DANGER.test(utterance))
     return "Please get to safety first, then call 112 right now. Don't go back in for belongings.";
   return undefined;
@@ -91,7 +92,7 @@ export async function chatAnswer(utterance: string, type: "chat" | "creative"): 
   const t0 = performance.now();
   const system =
     type === "creative"
-      ? "You are a warm, friendly voice assistant. Write what the user asks for, kept short enough to read aloud (under 120 words), in plain text with no markdown. Never state facts about current events, prices or real people's private lives."
+      ? "You are a warm, friendly voice assistant. Write what the user asks for, kept short enough to read aloud (under 120 words), in plain text with no markdown; a poem keeps its line breaks. Never state facts about current events, prices or real people's private lives."
       : "You are Forge, a friendly voice assistant that learns new skills: live data (weather, news, prices), explaining things from Wikipedia, exact facts, and calculations, and it asks before keeping a new skill. Reply in one or two short spoken sentences, plain text. Never claim to know current events or the user's personal data.";
   const speech = await sayText(system, utterance, type === "creative" ? 400 : 120);
   return speech ? { speech, by: routerModel, ms: Math.round(performance.now() - t0) } : undefined;
@@ -183,13 +184,16 @@ export function unsupported(answer: string, passages: Passage[], question: strin
 
 // ---------- model calls ----------
 
+// Spaces tidied, line breaks kept (a poem's lines); the voice reads them as pauses.
+const tidy = (text: string) => text.replace(/[^\S\n]+/g, " ").replace(/ *\n+ */g, "\n").trim();
+
 async function sayText(system: string, user: string, maxTokens: number): Promise<string> {
   if (config.provider === "ollama") {
     const { speech } = await askOllama<{ speech: string }>(system, user, { type: "object", properties: { speech: { type: "string" } }, required: ["speech"] }, 0.3);
-    return (speech ?? "").replace(/\s+/g, " ").trim();
+    return tidy(speech ?? "");
   }
   const res = await createClient().messages.create({ model: routerModel, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] });
-  return res.content.map((b) => (b.type === "text" ? b.text : "")).join("").replace(/\s+/g, " ").trim();
+  return tidy(res.content.map((b) => (b.type === "text" ? b.text : "")).join(""));
 }
 
 async function claudeJson<T>(system: string, user: string): Promise<T> {
