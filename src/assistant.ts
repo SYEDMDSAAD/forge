@@ -4,7 +4,13 @@
 // It is not part of the MCP server: Forge never routes requests itself.
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
+import { CATALOG } from "./forge/catalog.js";
 import { askOllama, createClient } from "./llm.js";
+
+// A source's one general skill answers far more than the question it was first
+// learned for (explain_topic: any topic), so that question isn't shown as its example.
+const GENERAL = new Set(CATALOG.flatMap((s) => (s.tool ? [s.tool.name] : [])));
+const example = (s: RouteSkill) => (GENERAL.has(s.name) ? undefined : s.request);
 
 export interface RouteSkill {
   name: string;
@@ -23,14 +29,14 @@ const routerModel =
 
 const SYSTEM =
   "You are a voice assistant deciding which of your skills answers the user's request. " +
-  "A skill fits only if it answers exactly this kind of question with live data (a weather skill does not answer air quality, a crypto skill does not convert currencies). " +
+  "A skill fits only if it answers exactly this kind of question (a weather skill does not answer air quality, a crypto skill does not convert currencies). " +
   "If no skill fits, choose none: a new skill will be learned for it.";
 
 function menu(skills: RouteSkill[]): string {
   return skills
     .map((s) => {
       const inputs = Object.entries(s.inputSchema.properties ?? {}).map(([k, p]) => `${k}: ${p.description ?? p.type}`);
-      return `- ${s.name}: ${s.description}${s.request ? ` Learned for: "${s.request}".` : ""}${inputs.length ? ` Inputs: ${inputs.join("; ")}.` : ""}`;
+      return `- ${s.name}: ${s.description}${example(s) ? ` Learned for: "${example(s)}".` : ""}${inputs.length ? ` Inputs: ${inputs.join("; ")}.` : ""}`;
     })
     .join("\n");
 }
@@ -55,7 +61,7 @@ async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<Route
     if (!skill) return undefined;
     const check = await askOllama<{ answers: boolean }>(
       SYSTEM,
-      `The user asked: "${utterance}"\n\nSkill: ${skill.description}${skill.request ? `\nIt was learned for questions like: "${skill.request}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather now is not tomorrow's forecast, weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography, news headlines are not a schedule (when the next rocket launch or match is).`,
+      `The user asked: "${utterance}"\n\nSkill: ${skill.description}${example(skill) ? `\nIt was learned for questions like: "${example(skill)}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather now is not tomorrow's forecast, weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography, news headlines are not a schedule (when the next rocket launch or match is).`,
       { type: "object", properties: { answers: { type: "boolean" } }, required: ["answers"] },
       0,
     );

@@ -1,0 +1,34 @@
+[
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between bubble sort and quicksort?",
+    "expect": "use",
+    "ok": true,
+    "shown": "explain_topic {\"topic\":\"bubble sort\",\"compare_with\":\"quicksort\"}: \"Bubble sort, sometimes referred to as sinking sort, is a simple sorting algorithm that repeatedly steps through the input list element by el\""
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between binary search and quicksort?",
+    "expect": "use",
+    "ok": false,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "Who was Ada Lovelace?",
+    "expect": "use",
+    "ok": true,
+    "shown": "explain_topic {\"topic\":\"Ada Lovelace\"}: \"Augusta Ada King, Countess of Lovelace, also known as Ada Lovelace, was an English mathematician and writer chiefly known for work on Charle\""
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the weather in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

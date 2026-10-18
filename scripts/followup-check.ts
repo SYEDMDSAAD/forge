@@ -66,6 +66,15 @@ const GROUPS: { learn: string; asks: Ask[] }[] = [
     ],
   },
   {
+    learn: "Can you tell me the difference between merge sort and quicksort?",
+    asks: [
+      ["What's the difference between bubble sort and quicksort?", "use", /^(?![^]*merge)[^]*bubble/i],
+      ["What's the difference between binary search and quicksort?", "use", /^(?![^]*merge)[^]*binary search/i],
+      ["Who was Ada Lovelace?", "use", /lovelace/i],
+      ["What's the weather in Pune?", "new"],
+    ],
+  },
+  {
     learn: "Where is the ISS right now?",
     asks: [
       ["How many people are in space right now?", "new"],

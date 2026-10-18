@@ -1,0 +1,34 @@
+[
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between bubble sort and quicksort?",
+    "expect": "use",
+    "ok": false,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between binary search and quicksort?",
+    "expect": "use",
+    "ok": false,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "Who was Ada Lovelace?",
+    "expect": "use",
+    "ok": false,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the weather in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

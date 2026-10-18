@@ -1,6 +1,7 @@
 // The text cross-checks: a news skill passes only if its answer quotes a
 // headline from the feed it read for its topic, and a launch skill only if it
-// names a launch from the list it read for the agency asked about.
+// names a launch from the list it read for the agency asked about, and a
+// Wikipedia skill only if it quotes the summary it read.
 //   npx tsx scripts/news-check.ts
 import { catalogById } from "../src/forge/catalog.js";
 import { runInSandbox, shutdownSandbox } from "../src/sandbox/sandbox.js";
@@ -52,6 +53,17 @@ try {
   const r = (await (await fetch(url)).json()).results[0];
   return { speech: "The next launch is " + r.name + " by " + r.lsp_name + "." };
 }`;
+  // Wikipedia: a skill that reads the summaries but says its own words is rejected.
+  const wiki = (said: string) => `export default async function run({ topic }) {
+  const s = await (await fetch("https://en.wikipedia.org/w/rest.php/v1/search/title?limit=1&q=" + encodeURIComponent(topic))).json();
+  const p = await (await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + s.pages[0].key)).json();
+  return { speech: ${said} };
+}`;
+  const quotes = await test(wiki('p.extract.split(". ").slice(0, 2).join(". ")'), { topic: "Quicksort" }, "wikipedia");
+  check(quotes?.passed === true, "a Wikipedia skill that says the summary it read passes");
+  const ownWords = await test(wiki('"Quicksort is a fast divide-and-conquer sorting algorithm that picks a pivot and partitions the array around it."'), { topic: "Quicksort" }, "wikipedia");
+  check(ownWords?.passed === false && /quotes none/.test(ownWords.error ?? ""), "a Wikipedia skill that reads the summary but says its own words is rejected");
+
   // The Space Devs allows 15 requests an hour; when it refuses, these two can't run.
   const nasa = await test(launches(true), { agency: "NASA" }, "launches");
   if (nasa?.refused) console.log("SKIP launch checks: The Space Devs is rate-limiting this network (429); try again in an hour");

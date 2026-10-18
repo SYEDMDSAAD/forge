@@ -142,6 +142,25 @@ const LAUNCH_REFERENCE: Reference = {
 }`,
 };
 
+// Wikipedia's own words: the answer must quote a summary the skill read, so a
+// skill can't fetch the articles and then say something the model wrote itself.
+const WIKIPEDIA_REFERENCE: Reference = {
+  code: `export default async function (input, { fetched = [] } = {}) {
+  let urls = fetched.filter((u) => u.includes("/page/summary/"));
+  if (!urls.length) {
+    const topics = Object.values(input).filter((v) => typeof v === "string" && v.trim());
+    if (!topics.length) throw new Error("Cross-check failed: the skill never read a Wikipedia summary, so its answer can't come from Wikipedia.");
+    for (const t of topics) {
+      const s = await (await fetch("https://en.wikipedia.org/w/rest.php/v1/search/title?limit=1&q=" + encodeURIComponent(t))).json();
+      if (s.pages?.[0]) urls.push("https://en.wikipedia.org/api/rest_v1/page/summary/" + s.pages[0].key);
+    }
+  }
+  const out = [];
+  for (const u of urls) out.push((await (await fetch(u)).json()).extract ?? "");
+  return out.filter((t) => t.length >= 12);
+}`,
+};
+
 export const CATALOG: Source[] = [
   {
     id: "weather",
@@ -254,9 +273,19 @@ export const CATALOG: Source[] = [
   },
   {
     id: "wikipedia",
+    reference: WIKIPEDIA_REFERENCE,
     name: "Wikipedia",
-    useFor: "who/what is something, short facts or a summary about a person, place, thing or topic",
+    useFor: "who or what something is, or the difference between two things: a summary of a person, place, event, idea or concept (science, history, technology, algorithms)",
     domains: ["en.wikipedia.org"],
+    tool: {
+      name: "explain_topic",
+      title: "Explain from Wikipedia",
+      description: "Explains a person, place, event, idea or concept from its Wikipedia summary, or compares two of them (merge sort and quicksort, Delhi and Mumbai).",
+      inputs: [
+        { name: "topic", description: "what to explain, as a Wikipedia article name, e.g. Quicksort or Ada Lovelace", another: ["Binary search", "Taj Mahal"] },
+        { name: "compare_with", description: "a second topic, only when the user asks to compare or for a difference; leave out otherwise", optional: true, another: ["Bubble sort", "Red Fort"] },
+      ],
+    },
     endpoints: [
       {
         url: "https://en.wikipedia.org/w/rest.php/v1/search/title?q={query}&limit=1",
@@ -269,7 +298,9 @@ export const CATALOG: Source[] = [
         example: "https://en.wikipedia.org/api/rest_v1/page/summary/Taj_Mahal",
       },
     ],
-    notes: "Search first to get the page key, then fetch the summary. Speak only the first one or two sentences of extract.",
+    notes: `Search first to get the page key, then fetch the summary. Do this for topic, and for compare_with when it is given. The answer must be Wikipedia's own words, never your own:
+const first = (text) => text.split(". ").slice(0, 2).join(". ").replace(/\\.?$/, ".");
+Speech: first(extract) for topic, then first(extract) for compare_with if given, joined with a space. If a search finds no page, say that topic wasn't found on Wikipedia.`,
   },
   {
     id: "news",
