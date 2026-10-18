@@ -118,7 +118,7 @@ async function crossCheck(speech, test, fetched) {
   if (texts.length) {
     const hit = texts.find((t) => plain(speech).includes(plain(t).slice(0, 32)));
     if (hit) return { said: hit.slice(0, 120), source: "a current headline" };
-    return { error: `Cross-check failed: the answer quotes none of the headlines the source reports right now, such as "${texts[0]}". Read the titles from the response and say them.` };
+    return { error: `Cross-check failed: the answer quotes none of the headlines or names the source reports right now, such as "${texts[0]}". Read the titles from the response and say them.` };
   }
   const said = numbersIn(speech);
   if (!said.length) return { skipped: "the answer has no numbers to check" };

@@ -28,7 +28,7 @@ export interface Source {
    * so a skill learned for one question never answers a different one with a
    * fixed topic, and later questions reuse it.
    */
-  tool?: { name: string; title: string; description: string; input: { name: string; description: string } };
+  tool?: { name: string; title: string; description: string; input: { name: string; description: string; optional?: boolean } };
 }
 
 // Reference checks. They can't know the input names a model chose, so they read
@@ -116,6 +116,23 @@ const NEWS_REFERENCE: Reference = {
   if (topic.length && !topic.some((w) => asked.includes(w))) throw new Error("Cross-check failed: the skill searched for '" + asked + "' instead of its topic input. Build the query from the input.");
   const xml = await (await fetch(url)).text();
   return xml.split("<item>").slice(1, 30).map((it) => (it.split("<title>")[1] ?? "").split("</title>")[0]);
+}`,
+};
+
+// Launch names, like the headlines: the answer must name one of the launches in
+// the very list the skill read, and a skill asked about one agency must search for it.
+const LAUNCH_REFERENCE: Reference = {
+  code: `export default async function (input, { fetched = [] } = {}) {
+  const asked = Object.values(input).filter((v) => typeof v === "string").join(" ").trim();
+  let url = fetched.find((u) => u.includes("/launch/upcoming"));
+  if (!url) {
+    if (!asked) throw new Error("Cross-check failed: the skill never read the launch list, so its answer can't come from it.");
+    url = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list&search=" + encodeURIComponent(asked);
+  }
+  const search = decodeURIComponent(url.split("search=")[1]?.split("&")[0] ?? "").toLowerCase();
+  if (asked && !asked.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 1 && search.includes(w))) throw new Error("Cross-check failed: the user asked about '" + asked + "' but the skill didn't search for it. Add &search= with the input to the URL.");
+  const json = await (await fetch(url)).json();
+  return (json.results ?? []).slice(0, 3).map((r) => r.name);
 }`,
 };
 
@@ -287,17 +304,26 @@ If titles is empty, say no recent news was found. Each title already ends with "
   },
   {
     id: "launches",
+    reference: LAUNCH_REFERENCE,
     name: "The Space Devs",
-    useFor: "upcoming rocket launches, next space launch",
+    useFor: "upcoming rocket launches, next space launch, from any agency or a named one (NASA, ISRO, SpaceX)",
     domains: ["ll.thespacedevs.com"],
+    tool: {
+      name: "get_next_launch",
+      title: "Next Rocket Launch",
+      description: "When the next rocket launch is: any launch, or one by a named agency, company, rocket or mission (NASA, ISRO, SpaceX, Artemis).",
+      input: { name: "agency", description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true },
+    },
     endpoints: [
       {
-        url: "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list",
+        url: "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list&search={agency}",
         returns: "{ results: [{ name, net (ISO launch time, UTC), status: { name }, lsp_name, location }] }",
-        example: "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&mode=list",
+        example: "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&mode=list&search=NASA",
       },
     ],
-    notes: "Rate limited to 15 calls/hour. Say the launch time in words, e.g. with toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }).",
+    notes: `Rate limited to 15 calls/hour. Build the URL like this, so the search is added only when an agency was given:
+const url = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list" + (agency ? "&search=" + encodeURIComponent(agency) : "");
+If results is empty, say no upcoming launch was found. Speech: the first result's name, who launches it (lsp_name), and the time in words, e.g. new Date(r.net).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) + " India time". data: { launch: r.name, provider: r.lsp_name, time: r.net, status: r.status.name, location: r.location }.`,
   },
   {
     id: "earthquakes",

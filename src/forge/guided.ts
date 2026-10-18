@@ -18,7 +18,7 @@ interface Plan {
   name: string;
   title: string;
   description: string;
-  inputs: { name: string; type: "string" | "number"; description: string; example: string }[];
+  inputs: { name: string; type: "string" | "number"; description: string; example: string; optional?: boolean }[];
 }
 
 const PLAN_SCHEMA = {
@@ -168,17 +168,19 @@ function toSnake(s: string): string {
 function buildSpec(request: string, plan: Plan, src: Source, code: string): ToolSpec {
   const properties: Record<string, unknown> = {};
   const input: Record<string, unknown> = {};
+  const required: string[] = [];
   for (const i of plan.inputs) {
     const key = toSnake(i.name);
     properties[key] = { type: i.type, description: i.description };
-    input[key] = i.type === "number" ? Number(i.example) : i.example;
+    if (!i.optional) required.push(key);
+    if (!i.optional || i.example.trim()) input[key] = i.type === "number" ? Number(i.example) : i.example;
   }
   const description = plan.description.length >= 20 ? plan.description : `${plan.description || plan.title}. Use for ${src.useFor}.`;
   return {
     name: toSnake(plan.name),
     title: plan.title || plan.name,
     description,
-    inputSchema: { type: "object", properties, required: Object.keys(properties) },
+    inputSchema: { type: "object", properties, required },
     code,
     allowedDomains: src.domains,
     tests: [{ name: "example", input, assert: speechAssert(request), ...(src.reference ? { reference: src.reference } : {}) }],
@@ -204,29 +206,26 @@ function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent:
   const speech = (r?.result as { speech?: string } | undefined)?.speech;
   if (speech) onEvent({ stage: "test", message: `Test ${JSON.stringify(spec.tests[0].input)} answered: "${speech.slice(0, 160)}"` });
   const c = r?.crossCheck;
-  if (typeof c?.said === "string") onEvent({ stage: "test", message: `Cross-check: the answer quotes "${c.said}", a headline in the ${source} feed it read` });
+  if (typeof c?.said === "string") onEvent({ stage: "test", message: `Cross-check: the answer names "${c.said}", listed by ${source} in the response it read` });
   else if (c?.source !== undefined) onEvent({ stage: "test", message: `Cross-check: the answer says ${c.said}, ${source} says ${c.source}${r.passed ? ", a match" : ""}` });
   else if (c?.skipped) onEvent({ stage: "test", message: `Cross-check skipped: ${c.skipped}` });
 }
 
 /** Turns the plan into the source's one general skill, keeping the user's topic as the test example. */
 async function generalTool(request: string, plan: Plan, tool: NonNullable<Source["tool"]>) {
-  const given = plan.inputs.find((i) => i.type === "string" && i.example.trim());
-  const example =
-    given?.example ??
-    (
-      await ask<{ topic: string }>(
-        "You extract search keywords.",
-        `The user asked: "${request}"\n\nGive the topic as a few search keywords (${tool.input.description}).`,
-        { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] },
-        0,
-      )
-    ).topic;
+  const { value } = await ask<{ value: string }>(
+    "You extract search keywords from a request.",
+    `The user asked: "${request}"\n\nWhat is ${tool.input.name}? (${tool.input.description}). Reply with a few keywords${tool.input.optional ? ", or an empty string if the user didn't name one" : ""}.`,
+    { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    0,
+  );
+  const given = plan.inputs.find((i) => i.type === "string" && i.example.trim())?.example;
+  const example = value.trim() || (tool.input.optional ? "" : (given ?? request));
   Object.assign(plan, {
     name: tool.name,
     title: tool.title,
     description: tool.description,
-    inputs: [{ name: tool.input.name, type: "string", description: tool.input.description, example }],
+    inputs: [{ name: tool.input.name, type: "string", description: tool.input.description, example, optional: tool.input.optional }],
   });
 }
 

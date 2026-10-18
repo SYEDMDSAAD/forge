@@ -135,7 +135,10 @@ function unit(key: string): string {
 
 /** "us_aqi" → "US AQI", "pm2_5" → "PM2.5", "wind_speed" → "Wind speed". */
 const ACRONYMS = new Set(["aqi", "us", "uv", "iss", "pm10", "utc", "usd", "inr", "eur"]);
+// API jargon the launch and news sources use.
+const LABELS: Record<string, string> = { net: "Launch time", lsp_name: "Provider", lsp: "Provider", pad: "Launch pad" };
 function label(key: string): string {
+  if (LABELS[key.toLowerCase()]) return LABELS[key.toLowerCase()];
   const words = key
     .replace(/pm2_5/i, "PM2.5")
     .split(/[_\s]+/)
@@ -156,7 +159,7 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
     const stats = el("div", "stats");
     for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
       if (v === null || typeof v === "object" || hiddenKey(k) || String(v).length > 40) continue;
-      const stat = el("div", "stat");
+      const stat = el("div", typeof v === "number" ? "stat" : "stat text");
       stat.append(el("b", undefined, display(v) + (typeof v === "number" ? unit(k) : "")), el("span", undefined, label(k)));
       stat.title = `${label(k)}: ${display(v)}`;
       stats.append(stat);

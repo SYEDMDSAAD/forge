@@ -87,6 +87,19 @@ const FEW_NEWS: typeof CASES = [
   ["What's the latest news about ISRO?", "get_news", {}],
   ["Any news on the India cricket team?", "get_news", {}],
 ];
+const ONLY_LAUNCH = [
+  {
+    ...skill("get_next_launch", "When the next rocket launch is: any launch, or one by a named agency, company, rocket or mission (NASA, ISRO, SpaceX, Artemis).", {
+      agency: str("the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch"),
+    }),
+    inputSchema: { properties: { agency: str("the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch") }, required: [] },
+    request: "When is the next rocket launch?",
+  },
+];
+const FEW_LAUNCH: typeof CASES = [
+  ["When is NASA's next launch?", "get_next_launch", { agency: "NASA" }],
+  ["What's the next rocket going to space?", "get_next_launch", {}],
+];
 
 const norm = (v: unknown) => String(v).toLowerCase().trim();
 let passed = 0;
@@ -96,6 +109,7 @@ const runs: [string, RouteSkill[], typeof CASES][] = [
   ["only a weather skill", ONLY_WEATHER, FEW],
   ["only a currency skill", ONLY_CURRENCY, FEW_CURRENCY],
   ["only a news skill", ONLY_NEWS, FEW_NEWS],
+  ["only the general launch skill", ONLY_LAUNCH, FEW_LAUNCH],
 ];
 for (const [label, skills, cases] of runs) {
 console.log(`\n${label}:`);
@@ -115,6 +129,6 @@ for (const [utterance, want, inputs, missing = []] of cases) {
   console.log(`${problems.length ? "FAIL" : "PASS"} ${utterance} -> ${shown} (${r.ms} ms)${problems.length ? `  [want ${want ?? "none"}: ${problems.join(", ")}]` : ""}`);
 }
 }
-const count = CASES.length + FEW.length + FEW_CURRENCY.length + FEW_NEWS.length;
+const count = runs.reduce((n, [, , c]) => n + c.length, 0);
 console.log(`\n${passed}/${count} routed correctly, ${Math.round(total / count)} ms on average`);
 process.exit(passed === count ? 0 : 1);

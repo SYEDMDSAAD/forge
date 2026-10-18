@@ -1,5 +1,6 @@
-// The headline cross-check: a news skill passes only if its answer quotes a
-// headline from the feed it read, even when its topic is fixed in the code.
+// The text cross-checks: a news skill passes only if its answer quotes a
+// headline from the feed it read for its topic, and a launch skill only if it
+// names a launch from the list it read for the agency asked about.
 //   npx tsx scripts/news-check.ts
 import { catalogById } from "../src/forge/catalog.js";
 import { runInSandbox, shutdownSandbox } from "../src/sandbox/sandbox.js";
@@ -10,11 +11,11 @@ const check = (ok: boolean, what: string) => {
   if (!ok) failed = true;
 };
 
-const reference = catalogById.get("news")!.reference!;
 const feed = JSON.stringify("https://news.google.com/rss/search?q=india+when:7d&hl=en-IN&gl=IN&ceid=IN:en");
 
-async function test(code: string, input: Record<string, unknown> = {}) {
-  const out = await runInSandbox({ mode: "test", code, allowedDomains: ["news.google.com"], tests: [{ name: "t", input, assert: "true", reference }] });
+async function test(code: string, input: Record<string, unknown> = {}, source = "news") {
+  const src = catalogById.get(source)!;
+  const out = await runInSandbox({ mode: "test", code, allowedDomains: src.domains, tests: [{ name: "t", input, assert: "true", reference: src.reference! }] });
   return (out as { results?: { passed: boolean; error?: string }[] }).results?.[0];
 }
 
@@ -43,6 +44,17 @@ try {
   return { speech: "Latest news on " + topic + ": " + titles.join("; ") + "." };
 }`, { topic: "rocket launch" });
   check(fixedTopic?.passed === false && /instead of its topic/.test(fixedTopic.error ?? ""), "a skill that ignores its topic and reads a fixed feed is rejected");
+
+  // Launches: the answer must name a launch from the list it read, searched for the agency asked about.
+  const launches = (search: boolean) => `export default async function run({ agency }) {
+  const url = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list"${search ? ' + (agency ? "&search=" + encodeURIComponent(agency) : "")' : ""};
+  const r = (await (await fetch(url)).json()).results[0];
+  return { speech: "The next launch is " + r.name + " by " + r.lsp_name + "." };
+}`;
+  const nasa = await test(launches(true), { agency: "NASA" }, "launches");
+  check(nasa?.passed === true, "a launch skill that searches for the agency asked about passes");
+  const anyAgency = await test(launches(false), { agency: "NASA" }, "launches");
+  check(anyAgency?.passed === false && /didn't search for it/.test(anyAgency.error ?? ""), "a launch skill asked about NASA that reads every agency's launches is rejected");
 } finally {
   shutdownSandbox();
 }

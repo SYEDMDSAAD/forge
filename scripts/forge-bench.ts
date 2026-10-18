@@ -18,6 +18,7 @@ const CASES: { request: string; expect: "build" | "refuse" }[] = [
   { request: "What are the top stories on Hacker News?", expect: "build" },
   { request: "What does the word ephemeral mean?", expect: "build" },
   { request: "When is the next rocket launch?", expect: "build" },
+  { request: "When is NASA's next launch?", expect: "build" },
   { request: "Were there any big earthquakes today?", expect: "build" },
   { request: "Book me a cab to the airport", expect: "refuse" },
 ];
