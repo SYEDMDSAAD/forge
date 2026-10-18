@@ -65,7 +65,10 @@ try {
     await new Promise((r) => setTimeout(r, 500));
     again = await call("use_skill", { name: "get_current_weather", input: { city: "Pune" } });
   }
-  check(/Also tell the user: I've finished learning "Current Weather" and it needs your OK/.test(again.text), `the next answer announces the finished skill: "${again.text.slice(again.text.indexOf("Also")).slice(0, 110)}"`);
+  check(
+    /Also tell the user: I've learned how to answer "[^"]+": It's \d+ degrees in Pune[^]*Should I keep this skill, "Current Weather"/.test(again.text),
+    `the next answer gives the user the answer, then offers to keep the skill: "${again.text.slice(again.text.indexOf("Also")).slice(0, 130)}"`,
+  );
   check(!/Also tell the user/.test((await call("use_skill", { name: "get_current_weather", input: {} })).text), "the news is told only once per session");
 
   const pending = await call("list_capabilities", {});

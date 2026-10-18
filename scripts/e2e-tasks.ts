@@ -88,7 +88,10 @@ try {
     check(prompts.length === 0, "no elicitation sent to a client without it");
     await new Promise((r) => setTimeout(r, 300));
     const ready = notices.find((n) => n.stage === "skill_ready");
-    check(!!ready && /finished learning/.test(ready.message ?? ""), `background build announced with a notice: "${ready?.message?.slice(0, 70)}"`);
+    check(
+      !!ready && /I've learned how to answer/.test(ready.message ?? "") && /degrees/.test(ready.message ?? "") && /keep this skill/.test(ready.message ?? ""),
+      `background build announced with a notice, answer included: "${ready?.message?.slice(0, 90)}"`,
+    );
 
     const approved = await client.callTool({ name: "approve_capability", arguments: { id: list.pending[0].id, approve: true } });
     check((approved.structuredContent as any)?.status === "installed", "approve_capability installs it");

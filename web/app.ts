@@ -215,7 +215,7 @@ function renderSkills(freshName?: string) {
 // ---------- build timeline ----------
 // In the conversation: four steps anyone can follow. In the side panel: the full log.
 
-const PHASES = ["Find a source", "Write the code", "Test & cross-check", "Your OK"];
+const PHASES = ["Find a source", "Write the code", "Test & cross-check", "Answer · keep it?"];
 
 function learnCard(request: string) {
   const card = el("div", "card learn");
@@ -253,10 +253,10 @@ function learnCard(request: string) {
       else if (stage === "test") set(2);
       else if (stage === "ready") set(3);
     },
-    waiting() {
+    waiting(answered = false) {
       stop();
       set(3);
-      detail.textContent = "Waiting for your OK";
+      detail.textContent = answered ? "Answered below. Keep the skill for next time?" : "Waiting for your OK";
     },
     end(ok: boolean, text: string) {
       stop();
@@ -304,9 +304,26 @@ function buildEnd(ok: boolean, text: string) {
 
 // ---------- consent ----------
 
-/** Shows the consent card, says it aloud, and resolves with the user's choice. */
-async function consentCard(cap: Skill | null, message: string, intro = "I've learned a new skill"): Promise<boolean> {
+/** What a new skill answered for the user's own request in its live test, before it is installed. */
+interface FirstAnswer {
+  speech: string;
+  data: unknown;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Answers right away when the new skill's live test already did (that test ran on
+ * the user's own request), then asks whether to keep the skill for next time.
+ * Says it aloud and resolves with the user's choice.
+ */
+async function consentCard(cap: Skill | null, message: string, answer?: FirstAnswer, intro = "I've learned a new skill"): Promise<boolean> {
+  const inputs = answer && Object.keys(answer.input).length ? ` with ${JSON.stringify(answer.input)}` : "";
+  if (answer && cap) answerCard(cap, answer.speech, answer.data, `Answered by the new skill's live test${inputs}, before you decide to keep it`);
   const node = ($<HTMLTemplateElement>("consent-tpl").content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLElement;
+  if (answer) {
+    node.querySelector(".card-kicker")!.lastChild!.textContent = " Keep this skill for next time?";
+    node.querySelector(".yes")!.textContent = "Keep it";
+  }
   node.querySelector(".card-title")!.textContent = cap?.title ?? "New skill";
   node.querySelector(".card-body")!.textContent = cap?.description ?? message;
   const domains = node.querySelector(".domains")!;
@@ -319,34 +336,42 @@ async function consentCard(cap: Skill | null, message: string, intro = "I've lea
     if (cap.crossChecked && cap.sources?.length) node.querySelector(".cross")!.textContent = `Its answer was cross-checked against ${cap.sources.join(" and ")}`;
   } else node.querySelector(".checks")!.remove();
   addCard(node);
-  speak(`${intro}: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);
+  const sites = (cap?.allowedDomains ?? []).join(" and ");
+  speak(
+    answer
+      ? `${answer.speech} I learned a new skill for this. Want me to keep it, so next time it's instant? It will only access ${sites}.`
+      : `${intro}: ${cap?.title ?? "it"}. It will only access ${sites}. Should I install it?`,
+  );
 
   const install = await new Promise<boolean>((resolve) => {
     node.querySelector<HTMLButtonElement>(".yes")!.onclick = () => resolve(true);
     node.querySelector<HTMLButtonElement>(".no")!.onclick = () => resolve(false);
   });
   for (const b of node.querySelectorAll("button")) b.disabled = true;
-  node.querySelector(install ? ".yes" : ".no")!.textContent = install ? "Installed ✓" : "Declined";
+  node.querySelector(install ? ".yes" : ".no")!.textContent = install ? (answer ? "Kept ✓" : "Installed ✓") : answer ? "Not kept" : "Declined";
   return install;
 }
 
 // Asked by the server (MCP elicitation) inside a build this page started.
 client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult> => {
-  buildStep("Waiting for your OK", "wait");
-  current?.waiting();
   const cap = (req.params._meta?.["forge/capability"] ?? null) as Skill | null;
-  return { action: "accept", content: { install: await consentCard(cap, req.params.message) } };
+  const answer = req.params._meta?.["forge/answer"] as FirstAnswer | undefined;
+  buildStep(answer ? "Answered from the live test; waiting for your OK to keep the skill" : "Waiting for your OK", "wait");
+  current?.waiting(Boolean(answer));
+  return { action: "accept", content: { install: await consentCard(cap, req.params.message, answer) } };
 });
 
 // A build that finished in the background, e.g. one a voice assistant started and
 // stopped waiting for: the server announces it to every connected client.
-async function onSkillReady(cap: Skill & { request?: string }, message: string) {
-  const install = await consentCard(cap, message, "Good news! I've finished learning a new skill");
+async function onSkillReady(cap: Skill & { request?: string }, message: string, answer?: FirstAnswer) {
+  if (answer && cap.request) addMsg("note", `About your earlier question: “${cap.request}”`);
+  const install = await consentCard(cap, message, answer, "Good news! I've finished learning a new skill");
   const res = (await client.callTool({ name: "approve_capability", arguments: { id: cap.id, approve: install } })) as CallToolResult;
-  if (!install) return say("Okay, I've discarded it.");
+  if (!install) return say(answer ? "Okay, I won't keep it." : "Okay, I've discarded it.");
   if (res.isError) return say("That skill is no longer waiting for approval.");
   await refresh(cap.name);
   const skill = skills.find((s) => s.name === cap.name);
+  if (answer) return say("Kept. Next time it's instant.");
   if (!skill || !cap.request) return;
   addMsg("note", `Answering the earlier request: “${cap.request}”`);
   const routed = await route(cap.request, skill);
@@ -369,8 +394,8 @@ client.setNotificationHandler(ToolListChangedNotificationSchema, () => void refr
 let building = false;
 const STEP_KIND: Record<string, "" | "ok" | "bad"> = { repair: "bad", ready: "ok" };
 client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
-  const d = n.params.data as { stage?: string; message?: string; capability?: Skill } | undefined;
-  if (n.params.logger === "forge" && d?.stage === "skill_ready" && d.capability) return void onSkillReady(d.capability, d.message ?? "").catch(() => {});
+  const d = n.params.data as { stage?: string; message?: string; capability?: Skill; answer?: FirstAnswer } | undefined;
+  if (n.params.logger === "forge" && d?.stage === "skill_ready" && d.capability) return void onSkillReady(d.capability, d.message ?? "", d.answer).catch(() => {});
   if (n.params.logger === "forge" && d?.stage === "skill_failed" && d.message) return void say(d.message);
   if (!building || n.params.logger !== "forge" || !d?.message) return;
   buildStep(d.message, STEP_KIND[d.stage ?? ""] ?? "");
@@ -572,8 +597,8 @@ async function useSkill({ skill, input, missing, via }: Routed) {
   void refresh();
 }
 
-/** Builds a skill for `utterance`; returns it once installed. */
-async function learn(utterance: string): Promise<Skill | undefined> {
+/** Builds a skill for `utterance`. `answered`: the user already heard the answer (from its live test). */
+async function learn(utterance: string): Promise<{ skill?: Skill; answered: boolean }> {
   say("I can't do that yet. Give me a minute — I'll learn how.");
   buildBegin(utterance);
   building = true;
@@ -587,29 +612,32 @@ async function learn(utterance: string): Promise<Skill | undefined> {
     else if (msg.type === "error") {
       buildEnd(false, msg.error.message);
       say("Something went wrong while I was learning that.");
-      return undefined;
+      return { answered: false };
     }
   }
-  const sc = result?.structuredContent as { status?: string; reason?: string; capability?: Skill } | undefined;
+  const sc = result?.structuredContent as { status?: string; reason?: string; capability?: Skill; answer?: FirstAnswer } | undefined;
+  const answered = Boolean(sc?.answer);
   if (sc?.status === "installed") {
-    buildEnd(true, `Installed ${sc.capability?.name ?? "the skill"}`);
+    buildEnd(true, answered ? `Answered, and kept ${sc.capability?.name ?? "the skill"} for next time` : `Installed ${sc.capability?.name ?? "the skill"}`);
     await refresh(sc.capability?.name);
-    return skills.find((s) => s.name === sc.capability?.name);
+    if (answered) say("Kept. Next time it's instant.");
+    return { skill: skills.find((s) => s.name === sc.capability?.name), answered };
   }
   if (sc?.status === "declined") {
-    buildEnd(false, "Not installed");
-    say("Okay, I won't install it.");
+    buildEnd(answered, answered ? "Answered; the skill wasn't kept" : "Not installed");
+    say(answered ? "Okay, I won't keep it. Ask again any time and I'll learn it again." : "Okay, I won't install it.");
   } else {
     buildEnd(false, sc?.reason ?? "Couldn't build it");
     say(sc?.reason ?? "I couldn't learn that one, sorry.");
   }
-  return undefined;
+  return { answered };
 }
 
 async function learnThenAnswer(utterance: string) {
   try {
-    const learned = await learn(utterance);
-    const routed = learned && (await route(utterance, learned));
+    const { skill, answered } = await learn(utterance);
+    if (answered || !skill) return;
+    const routed = await route(utterance, skill);
     if (routed) await useSkill(routed);
   } catch (e) {
     building = false;

@@ -8,7 +8,7 @@ Forge is an MCP server that lets the assistant build it itself:
 
 > **"I can't do that yet. Give me a minute — I'll learn how."**
 
-When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox, checks the numbers in its answer against the source itself, asks the user's permission (showing exactly which sites it will reach), and installs it. Next time, it just works.
+When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox on the user's own question, checks its answer against the source itself, and gives the user that answer right away. Then it asks whether to keep the skill (showing exactly which sites it will reach). Next time, it answers instantly.
 
 - **Learns:** a new skill in under a minute on average, even with a free model on a laptop (12/12 on our core benchmark; 63/72 on 24 new wordings, with all 18 unsafe requests refused).
 - **Safe:** every run in a fresh locked-down container that can only reach the skill's declared sites; nothing installs without the user's OK.
@@ -44,7 +44,7 @@ Alexa+ reads the tool list only at deployment and expects answers in under 500 m
 
 - **`use_skill(name, input)`** runs any learned skill through a fixed tool surface.
 - A plain `forge_capability` call answers *"I'm learning that now"* after `FORGE_WAIT_MS` (200 ms) and finishes in the background.
-- **The user hears back without asking.** When a background build finishes, the news rides along with the next answer from any Forge tool (*"Also tell the user: I've finished learning "Air Quality" and it needs your OK…"*), once per session, so a voice assistant that only reads tool results still passes it on. Connected clients are also told at once with an MCP log notice (`level: "notice"`, `data.stage: "skill_ready"` or `"skill_failed"`); the demo page speaks it, shows the consent card and then answers the original request. (A true push to an Echo device would go through Alexa's own notifications, which MCP add-ons can't send today.)
+- **The user hears back without asking.** When a background build finishes, the news rides along with the next answer from any Forge tool, answer included (*"Also tell the user: I've learned how to answer "what's the weather in Pune": It's 23 degrees in Pune right now. Source: Open-Meteo. Should I keep this skill…"*), once per session, so a voice assistant that only reads tool results still passes it on. Connected clients are also told at once with an MCP log notice (`level: "notice"`, `data.stage: "skill_ready"` or `"skill_failed"`); the demo page speaks the answer and asks whether to keep the skill. (A true push to an Echo device would go through Alexa's own notifications, which MCP add-ons can't send today.)
 - **`list_capabilities`** reports progress and skills waiting for approval (*"Current Weather is ready and needs your OK. It will only access api.open-meteo.com…"*); the user says yes by voice and the assistant calls **`approve_capability`**.
 - A **warm pool** of pre-started single-use sandbox runners keeps per-call overhead around 90 ms.
 
@@ -162,7 +162,7 @@ Generated code is untrusted. Forge assumes it may be wrong or hostile:
 - **Time limits** per call and per test run.
 - **Busy sources**: a GET that gets 429/502/503/504 is retried twice with a short pause; if the source is still down, the user hears that in plain words (*"Open-Meteo isn't answering right now (the service is overloaded). Try again in a minute."*) instead of an error.
 - **Response cache** (in the relay, for plain GETs): a reply is reused while the source says it's fresh (its `Cache-Control`; 10 minutes for Open-Meteo and The Space Devs, which send none; never for sources that say `no-cache`, like the ISS position). Repeat questions skip the source (~70 ms instead of ~1 s). When a source is down, a skill in real use can answer from its last good reply up to 2 hours old, and the answer says so: *"…Source: Open-Meteo. Open-Meteo isn't responding, so that's from 14 minutes ago."* Skills being built and tested never get old data. `FORGE_CACHE=0` turns it off.
-- **Human consent** before any skill is installed, showing exactly which sites it will access.
+- **Answer first, then consent.** The live test runs the new skill on the user's own question in the sandbox, and its cross-checked answer is given right away; the skill itself is installed only if the user says yes, after seeing exactly which sites it will access. Saying no still leaves the user with their answer. (Clients get the answer in the elicitation's `_meta["forge/answer"]`, in the `skill_ready` notice, and in the tool result.)
 - **Answers you can check**: every answer names its source, and the live test cross-checks the answer against the source itself with a hand-written reference check per source: the numbers must match (this catches a value read or computed wrongly, e.g. a currency conversion applied twice), and a news answer must quote a headline from the very feed the skill read (this catches an answer the model made up, even when the skill's topic is fixed in its code: `scripts/news-check.ts`).
 - **No secrets**: skills only use keyless public sources. Requests that need a login, payment or private data are declined.
 

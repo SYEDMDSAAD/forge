@@ -73,7 +73,12 @@ const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 const consentText = (cap: Capability) =>
   `It ${lowerFirst(cap.spec.description)} It will only access ${cap.spec.allowedDomains.join(", ")}. (approve with id ${cap.id})`;
 const readyText = (cap: Capability) => `"${cap.spec.title}" is ready and needs your OK. ${consentText(cap)}`;
-const learnedText = (cap: Capability) => `I've finished learning "${cap.spec.title}" and it needs your OK. ${consentText(cap)}`;
+const learnedText = (cap: Capability) => {
+  const answer = firstAnswer(cap);
+  return answer
+    ? `I've learned how to answer "${cap.request}": ${answer.speech} Should I keep this skill, "${cap.spec.title}", so next time it's instant? ${consentText(cap)}`
+    : `I've finished learning "${cap.spec.title}" and it needs your OK. ${consentText(cap)}`;
+};
 
 /**
  * Outcomes of background builds the user hasn't heard yet, for one session. A
@@ -111,6 +116,24 @@ function ago(ms: number): string {
 }
 
 /** Run a learned skill in a fresh sandbox runner; every answer names its source. */
+/** The answer with its source named, unless it already names it. */
+function cite(cap: Capability, speech: string): string {
+  const sources = sourcesOf(cap);
+  return sources.some((s) => speech.toLowerCase().includes(s.toLowerCase())) ? speech : `${speech} Source: ${sources.join(" and ")}.`;
+}
+
+/**
+ * The answer a new skill gave to the user's own request in its live test, before
+ * it was installed. The user hears it right away; installing only makes the next
+ * question like it instant.
+ */
+export function firstAnswer(cap: Capability): { speech: string; data: unknown; input: Record<string, unknown> } | undefined {
+  const r = cap.testReport.results[0];
+  const result = r?.passed ? (r.result as { speech?: string; data?: unknown } | undefined) : undefined;
+  if (!result?.speech) return undefined;
+  return { speech: cite(cap, result.speech), data: result.data ?? null, input: cap.spec.tests[0]?.input ?? {} };
+}
+
 async function runSkill(cap: Capability, input: Record<string, unknown>): Promise<CallToolResult> {
   const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
   registry.recordUse(cap.id);
@@ -123,9 +146,7 @@ async function runSkill(cap: Capability, input: Record<string, unknown>): Promis
   }
   if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
   const result = out.result as { speech: string; data?: unknown };
-  let cited = sources.some((s) => result.speech.toLowerCase().includes(s.toLowerCase()))
-    ? result.speech
-    : `${result.speech} Source: ${sources.join(" and ")}.`;
+  let cited = cite(cap, result.speech);
   if (out.staleMs !== undefined) cited += ` ${sources.join(" and ")} isn't responding, so that's from ${ago(out.staleMs)}.`;
   return {
     content: [
@@ -213,7 +234,7 @@ export function createServer(): McpServer {
     const cap = job.capabilityId ? registry.get(job.capabilityId) : undefined;
     const ready = job.status === "pending_approval" && cap;
     const data = ready
-      ? { stage: "skill_ready", message: learnedText(cap), jobId: job.id, capability: summarize(cap) }
+      ? { stage: "skill_ready", message: learnedText(cap), jobId: job.id, capability: summarize(cap), answer: firstAnswer(cap) }
       : { stage: "skill_failed", message: `I couldn't learn "${job.request}": ${job.message}`, jobId: job.id };
     void mcp.server.sendLoggingMessage({ level: "notice", logger: "forge", data }).catch(() => {});
   };
@@ -242,17 +263,19 @@ export function createServer(): McpServer {
   const askConsent = async (cap: Capability, elicit: Elicit): Promise<"accept" | "decline" | "unsupported"> => {
     if (!mcp.server.getClientCapabilities()?.elicitation) return "unsupported";
     const passed = cap.testReport.results.filter((r) => r.passed).length;
+    const answer = firstAnswer(cap);
     const res = await elicit({
       mode: "form",
-      // Structured details so a client can render a consent card instead of plain text.
-      _meta: { "forge/capability": summarize(cap) },
+      // Structured details so a client can render the answer and a consent card instead of plain text.
+      _meta: { "forge/capability": summarize(cap), ...(answer ? { "forge/answer": answer } : {}) },
       message:
-        `I learned a new skill: "${cap.spec.title}". ${cap.spec.description}\n` +
+        (answer ? `${answer.speech}\n\n` : "") +
+        `I learned a new skill to answer that: "${cap.spec.title}". ${cap.spec.description}\n` +
         `It passed ${passed}/${cap.testReport.results.length} live tests and will only access: ${cap.spec.allowedDomains.join(", ")}.\n` +
-        `Install it?`,
+        (answer ? `Keep it, so next time a question like this is answered instantly?` : `Install it?`),
       requestedSchema: {
         type: "object",
-        properties: { install: { type: "boolean", title: "Install this skill", default: true } },
+        properties: { install: { type: "boolean", title: answer ? "Keep this skill for next time" : "Install this skill", default: true } },
         required: ["install"],
       },
     });
@@ -296,22 +319,35 @@ export function createServer(): McpServer {
       registry.remove(cap.id);
       job.status = "declined";
       job.message = "The user declined it";
-      return text("The user chose not to install the new skill. It has been discarded.", { status: "declined" });
-    }
-    if (consent === "unsupported") {
+      const answer = firstAnswer(cap);
       return text(
-        `Built "${cap.spec.title}" and it passed its tests, but it needs the user's OK before installing. ` +
-          `Tell the user what it does and that it will access ${cap.spec.allowedDomains.join(", ")}, ask if they want it, then call approve_capability with id "${cap.id}".`,
-        { status: "pending_approval", capability: summarize(cap) },
+        answer
+          ? `The user chose not to keep the new skill, so it was discarded. The answer it found: ${answer.speech}`
+          : "The user chose not to install the new skill. It has been discarded.",
+        { status: "declined", ...(answer ? { answer } : {}) },
+      );
+    }
+    const answer = firstAnswer(cap);
+    if (consent === "unsupported") {
+      const sites = cap.spec.allowedDomains.join(", ");
+      return text(
+        answer
+          ? `Tell the user the answer now: ${answer.speech}\n` +
+              `Then ask if they want to keep the skill "${cap.spec.title}" so next time it's instant (it will only access ${sites}); if yes, call approve_capability with id "${cap.id}".`
+          : `Built "${cap.spec.title}" and it passed its tests, but it needs the user's OK before installing. ` +
+              `Tell the user what it does and that it will access ${sites}, ask if they want it, then call approve_capability with id "${cap.id}".`,
+        { status: "pending_approval", capability: summarize(cap), ...(answer ? { answer } : {}) },
       );
     }
     registry.activate(cap.id);
     job.status = "installed";
     job.message = `Installed ${cap.spec.title}`;
-    return text(`Installed the new skill "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request.`, {
-      status: "installed",
-      capability: summarize(cap),
-    });
+    return text(
+      answer
+        ? `Installed the new skill "${cap.spec.name}". The answer to the user's request: ${answer.speech}`
+        : `Installed the new skill "${cap.spec.name}". Call it now (directly or via use_skill) to answer the user's request.`,
+      { status: "installed", capability: summarize(cap), ...(answer ? { answer } : {}) },
+    );
   };
 
   mcp.experimental.tasks.registerToolTask(

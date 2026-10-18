@@ -11,6 +11,8 @@ export interface RouteSkill {
   title: string;
   description: string;
   inputSchema: { properties?: Record<string, { type?: string; description?: string }>; required?: string[] };
+  /** The question it was learned for: a concrete example of what it answers. */
+  request?: string;
 }
 
 type Picked = { skill: null } | { skill: string; input: Record<string, unknown>; missing: string[] };
@@ -28,7 +30,7 @@ function menu(skills: RouteSkill[]): string {
   return skills
     .map((s) => {
       const inputs = Object.entries(s.inputSchema.properties ?? {}).map(([k, p]) => `${k}: ${p.description ?? p.type}`);
-      return `- ${s.name}: ${s.description}${inputs.length ? ` Inputs: ${inputs.join("; ")}.` : ""}`;
+      return `- ${s.name}: ${s.description}${s.request ? ` Learned for: "${s.request}".` : ""}${inputs.length ? ` Inputs: ${inputs.join("; ")}.` : ""}`;
     })
     .join("\n");
 }
@@ -53,7 +55,7 @@ async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<Route
     if (!skill) return undefined;
     const check = await askOllama<{ answers: boolean }>(
       SYSTEM,
-      `The user asked: "${utterance}"\n\nSkill: ${skill.description}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather is not air quality or sunset time, a coin price is not a currency conversion, a word's meaning is not a person's biography.`,
+      `The user asked: "${utterance}"\n\nSkill: ${skill.description}${skill.request ? `\nIt was learned for questions like: "${skill.request}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography.`,
       { type: "object", properties: { answers: { type: "boolean" } }, required: ["answers"] },
       0,
     );

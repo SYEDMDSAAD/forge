@@ -54,7 +54,9 @@ const CASES: [string, string | null, Record<string, unknown>, string[]?][] = [
 
 // Early in a demo only one skill is learned, and a small model is tempted to use
 // it for anything nearby. The weather description is the one the guided smith wrote.
-const ONLY_WEATHER = [skill("get_current_weather", "Use this tool to check the current weather, temperature, rain chance, wind, and more for any city.", { city: str("City name") })];
+const ONLY_WEATHER = [
+  { ...skill("get_current_weather", "Use this tool to check the current weather, temperature, rain chance, wind, and more for any city.", { city: str("City name") }), request: "What's the weather in Pune right now?" },
+];
 const FEW: typeof CASES = [
   ["What's the air quality in Delhi?", null, {}],
   ["Where is the ISS right now?", null, {}],
@@ -64,12 +66,27 @@ const FEW: typeof CASES = [
   ["Is it windy in Kolkata?", "get_current_weather", { city: "Kolkata" }],
 ];
 
+// The same trap with a currency converter: crypto prices look like conversions.
+const ONLY_CURRENCY = [
+  skill("convert_currency", "Use this tool to convert money between different currencies.", {
+    amount: { type: "number", description: "The amount of money you want to convert." },
+    from_currency: str("The currency you are converting from (e.g., USD)."),
+    to_currency: str("The currency you want to convert to (e.g., INR)."),
+  }),
+].map((s) => ({ ...s, request: "Convert 100 US dollars to rupees" }));
+const FEW_CURRENCY: typeof CASES = [
+  ["What's the price of bitcoin in rupees?", null, {}],
+  ["How much is one ethereum worth in dollars?", null, {}],
+  ["Convert 50 euros to rupees", "convert_currency", { amount: 50, from_currency: "EUR", to_currency: "INR" }],
+];
+
 const norm = (v: unknown) => String(v).toLowerCase().trim();
 let passed = 0;
 let total = 0;
 const runs: [string, RouteSkill[], typeof CASES][] = [
   ["11 skills", SKILLS, CASES],
   ["only a weather skill", ONLY_WEATHER, FEW],
+  ["only a currency skill", ONLY_CURRENCY, FEW_CURRENCY],
 ];
 for (const [label, skills, cases] of runs) {
 console.log(`\n${label}:`);
@@ -89,6 +106,6 @@ for (const [utterance, want, inputs, missing = []] of cases) {
   console.log(`${problems.length ? "FAIL" : "PASS"} ${utterance} -> ${shown} (${r.ms} ms)${problems.length ? `  [want ${want ?? "none"}: ${problems.join(", ")}]` : ""}`);
 }
 }
-const count = CASES.length + FEW.length;
+const count = CASES.length + FEW.length + FEW_CURRENCY.length;
 console.log(`\n${passed}/${count} routed correctly, ${Math.round(total / count)} ms on average`);
 process.exit(passed === count ? 0 : 1);

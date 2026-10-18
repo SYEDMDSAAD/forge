@@ -70,7 +70,7 @@
       <li><b>Write.</b> It writes a small JavaScript skill: one function that takes your inputs (a city, an amount…) and returns a spoken answer.</li>
       <li><b>Test, live.</b> The skill runs in a sandbox, <span id="how-sandbox">a container with no network of its own</span>. Each request goes through Forge, which allows only the sites the skill declared and blocks private addresses. The test uses your own example, with real data.</li>
       <li><b>Cross-check.</b> For sources marked ✓ below, Forge's own trusted reference reads the same values from the source (a temperature, a rate, today's headlines); the answer must match them. Anything that fails is repaired and retried, up to <span id="how-attempts">4</span> attempts, or it is not kept.</li>
-      <li><b>Your OK.</b> You see what it does, its test result and every site it can reach. It is installed only if you say yes, and every answer cites its source.</li>
+      <li><b>Answer, then your OK.</b> The test ran on your own question, so you get that answer right away, with its source. Then you choose whether to keep the skill, after seeing every site it can reach. Keep it, and next time it's instant.</li>
     </ol>
     <h3>Where real-time data comes from</h3>
     <p class="muted">Every answer is fetched live from the source when you ask. A repeat within 10 minutes reuses the source's last reply; if a source is down, I say how old the answer is (2 hours at most). ✓ means its answers are cross-checked.</p>
