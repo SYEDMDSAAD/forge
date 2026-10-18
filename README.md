@@ -142,7 +142,7 @@ Choosing which skill answers a request is the assistant's job (Alexa+ or an LLM 
 
 The page speaks with a natural neural voice, [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, Apache-2.0), which the Forge server runs on the CPU (`src/voice.ts`, a 330 MB download the first time; full precision is twice as fast as the quantized model on a CPU). Pick from five voices next to "Speak answers". Answers are spoken one sentence at a time, the next made while the current one plays, so speech starts in about 1 s. Until the voice has loaded, or with `FORGE_VOICE=0`, the page uses the browser's best built-in voice. On Alexa+, Alexa speaks Forge's answers in its own voice.
 
-`scripts/router-check.ts` asks 18 paraphrased requests against 11 skills ("Do I need an umbrella in Mumbai?", "How many rupees is 250 dollars?", "Book me a cab"...). With `qwen2.5-coder:7b` it routes 17/18 correctly (it reads "Who was Ada Lovelace?" as a dictionary lookup), including unit conversion (`dollars` → `USD`) and noticing a missing city.
+`scripts/router-check.ts` asks 18 paraphrased requests against 11 skills ("Do I need an umbrella in Mumbai?", "How many rupees is 250 dollars?", "Book me a cab"...), and 6 more when only a weather skill exists, the state early in a demo, when a small model is tempted to use it for anything nearby ("What's the air quality in Delhi?"). So the local model checks each pick with a yes/no question ("does this skill give exactly what was asked?") and, if it says no, picks once more without that skill. With `qwen2.5-coder:7b` it routes 23/24 correctly, about 3.6 s per request, including unit conversion (`dollars` → `USD`) and noticing a missing city. The miss is a safe one: "What's trending in tech today?" learns a new skill instead of using the Hacker News one.
 
 ## Safety model
 
@@ -202,7 +202,7 @@ npx tsx scripts/sandbox-smoke.ts  # sandbox: live fetch allowed, other domains b
 npx tsx scripts/sandbox-latency.ts
 npx tsx scripts/forge-bench.ts    # smith reliability on 12 requests (needs a real provider)
 npx tsx scripts/crosscheck-demo.ts  # the cross-check rejecting a skill whose number is wrong
-npx tsx scripts/router-check.ts   # the demo page's skill routing on 18 paraphrased requests (needs a real provider)
+npx tsx scripts/router-check.ts   # the demo page's skill routing on 24 paraphrased requests (needs a real provider)
 ```
 
 ## Project layout

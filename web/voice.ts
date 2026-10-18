@@ -29,6 +29,7 @@ const store = {
 let voice: string = new URLSearchParams(location.search).get("voice") ?? store.get("forge.voice") ?? "af_heart";
 let enabled = () => true;
 let onStatus: (text: string) => void = () => {};
+let onSpeaking: (on: boolean) => void = () => {};
 
 // ---------- text as it should sound ----------
 
@@ -81,19 +82,21 @@ function browserVoice(): SpeechSynthesisVoice | undefined {
   return all.find((v) => !/espeak/i.test(v.name)) ?? all[0];
 }
 
-function speakWithBrowser(parts: string[]) {
-  if (!("speechSynthesis" in window)) return;
+function speakWithBrowser(parts: string[], mine: number) {
+  if (!("speechSynthesis" in window) || !parts.length) return onSpeaking(false);
   const v = browserVoice();
   // One utterance per sentence: Chrome's online voices stop mid-way through long ones.
-  for (const part of parts) {
+  parts.forEach((part, i) => {
     const u = new SpeechSynthesisUtterance(part);
     if (v) {
       u.voice = v;
       u.lang = v.lang;
     }
     u.rate = 1;
+    if (i === 0) u.onstart = () => mine === turn && onSpeaking(true);
+    if (i === parts.length - 1) u.onend = u.onerror = () => mine === turn && onSpeaking(false);
     speechSynthesis.speak(u);
-  }
+  });
 }
 
 // ---------- the natural voice ----------
@@ -152,14 +155,15 @@ export function stopSpeaking() {
   audio?.pause();
   audio = undefined;
   if ("speechSynthesis" in window) speechSynthesis.cancel();
+  onSpeaking(false);
 }
 
 export function speak(text: string) {
   if (!enabled()) return;
   stopSpeaking();
   const parts = sentences(spoken(text));
-  if (!ready || voice === "browser") return speakWithBrowser(parts);
   const mine = turn;
+  if (!ready || voice === "browser") return speakWithBrowser(parts, mine);
   request = new AbortController();
   const signal = request.signal;
   void (async () => {
@@ -168,17 +172,20 @@ export function speak(text: string) {
     for (let i = 0; i < parts.length; i++) {
       const wav = await next;
       if (mine !== turn) return;
-      if (!wav) return speakWithBrowser(parts.slice(i));
+      if (!wav) return speakWithBrowser(parts.slice(i), mine);
       if (i + 1 < parts.length) next = synthesize(parts[i + 1], signal);
+      onSpeaking(true);
       await play(wav);
       if (mine !== turn) return;
     }
+    onSpeaking(false);
   })();
 }
 
 /** Wires the voice picker and starts loading the natural voice in the background. */
-export function setupVoice(opts: { picker: HTMLSelectElement; status: HTMLElement; enabled: () => boolean }) {
+export function setupVoice(opts: { picker: HTMLSelectElement; status: HTMLElement; enabled: () => boolean; onSpeaking: (on: boolean) => void }) {
   enabled = opts.enabled;
+  onSpeaking = opts.onSpeaking;
   onStatus = (t) => (opts.status.textContent = t);
   if (!VOICES.some((v) => v.id === voice)) voice = "af_heart";
   for (const v of VOICES) opts.picker.append(new Option(v.label, v.id, false, v.id === voice));

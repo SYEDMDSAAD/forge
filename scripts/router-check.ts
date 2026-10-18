@@ -52,11 +52,29 @@ const CASES: [string, string | null, Record<string, unknown>, string[]?][] = [
   ["What's the UV index in Chennai?", null, {}],
 ];
 
+// Early in a demo only one skill is learned, and a small model is tempted to use
+// it for anything nearby. The weather description is the one the guided smith wrote.
+const ONLY_WEATHER = [skill("get_current_weather", "Use this tool to check the current weather, temperature, rain chance, wind, and more for any city.", { city: str("City name") })];
+const FEW: typeof CASES = [
+  ["What's the air quality in Delhi?", null, {}],
+  ["Where is the ISS right now?", null, {}],
+  ["Convert 100 US dollars to rupees", null, {}],
+  ["What time is sunset in Jaipur today?", null, {}],
+  ["How hot is it in Chennai?", "get_current_weather", { city: "Chennai" }],
+  ["Is it windy in Kolkata?", "get_current_weather", { city: "Kolkata" }],
+];
+
 const norm = (v: unknown) => String(v).toLowerCase().trim();
 let passed = 0;
 let total = 0;
-for (const [utterance, want, inputs, missing = []] of CASES) {
-  const r = await route(utterance, SKILLS);
+const runs: [string, RouteSkill[], typeof CASES][] = [
+  ["11 skills", SKILLS, CASES],
+  ["only a weather skill", ONLY_WEATHER, FEW],
+];
+for (const [label, skills, cases] of runs) {
+console.log(`\n${label}:`);
+for (const [utterance, want, inputs, missing = []] of cases) {
+  const r = await route(utterance, skills);
   if (!r) throw new Error("No router model: set FORGE_PROVIDER to ollama, anthropic or bedrock");
   total += r.ms;
   const got = r.skill === null ? null : r.skill;
@@ -70,5 +88,7 @@ for (const [utterance, want, inputs, missing = []] of CASES) {
   const shown = r.skill === null ? "none" : `${r.skill} ${JSON.stringify(r.input)}`;
   console.log(`${problems.length ? "FAIL" : "PASS"} ${utterance} -> ${shown} (${r.ms} ms)${problems.length ? `  [want ${want ?? "none"}: ${problems.join(", ")}]` : ""}`);
 }
-console.log(`\n${passed}/${CASES.length} routed correctly, ${Math.round(total / CASES.length)} ms on average`);
-process.exit(passed === CASES.length ? 0 : 1);
+}
+const count = CASES.length + FEW.length;
+console.log(`\n${passed}/${count} routed correctly, ${Math.round(total / count)} ms on average`);
+process.exit(passed === count ? 0 : 1);

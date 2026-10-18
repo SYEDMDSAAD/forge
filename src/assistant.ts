@@ -37,19 +37,35 @@ function missingOf(skill: RouteSkill, input: Record<string, unknown>): string[] 
   return (skill.inputSchema.required ?? []).filter((k) => input[k] === undefined || input[k] === null || input[k] === "");
 }
 
-/** Small local model: pick the skill, then fill its inputs, each constrained to a JSON schema. */
-async function routeOllama(utterance: string, skills: RouteSkill[], only?: string): Promise<Picked> {
-  let name = only;
-  if (!name) {
+// A small model offered one skill tends to pick it for anything nearby (weather
+// for air quality), so it checks each pick as a plain yes/no question. A pick it
+// rejects is left out of a second try.
+async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<RouteSkill | undefined> {
+  let left = skills;
+  for (let attempt = 0; attempt < 2 && left.length; attempt++) {
     const pick = await askOllama<{ skill: string }>(
       SYSTEM,
-      `Skills:\n${menu(skills)}\n\nUser: "${utterance}"\n\nWhich skill answers this? Reply with its name, or none.`,
-      { type: "object", properties: { skill: { type: "string", enum: [...skills.map((s) => s.name), "none"] } }, required: ["skill"] },
+      `Skills:\n${menu(left)}\n\nUser: "${utterance}"\n\nWhich skill answers this? Reply with its name, or none.`,
+      { type: "object", properties: { skill: { type: "string", enum: [...left.map((s) => s.name), "none"] } }, required: ["skill"] },
       0,
     );
-    name = pick.skill;
+    const skill = left.find((s) => s.name === pick.skill);
+    if (!skill) return undefined;
+    const check = await askOllama<{ answers: boolean }>(
+      SYSTEM,
+      `The user asked: "${utterance}"\n\nSkill: ${skill.description}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather is not air quality or sunset time, a coin price is not a currency conversion, a word's meaning is not a person's biography.`,
+      { type: "object", properties: { answers: { type: "boolean" } }, required: ["answers"] },
+      0,
+    );
+    if (check.answers) return skill;
+    left = left.filter((s) => s !== skill);
   }
-  const skill = skills.find((s) => s.name === name);
+  return undefined;
+}
+
+/** Small local model: pick the skill, then fill its inputs, each constrained to a JSON schema. */
+async function routeOllama(utterance: string, skills: RouteSkill[], only?: string): Promise<Picked> {
+  const skill = only ? skills.find((s) => s.name === only) : await pickSkill(utterance, skills);
   if (!skill) return { skill: null };
   const props = skill.inputSchema.properties ?? {};
   if (!Object.keys(props).length) return { skill: skill.name, input: {}, missing: [] };

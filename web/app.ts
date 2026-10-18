@@ -25,39 +25,80 @@ interface Skill {
   uses: number;
   sources?: string[];
   crossChecked?: boolean;
+  request?: string;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const chat = $<HTMLOListElement>("chat");
-const ring = $("ring");
 const input = $<HTMLInputElement>("say");
+const orb = $<HTMLButtonElement>("mic");
 
 const client = new Client({ name: "forge-web", version: "0.1.0" }, { capabilities: { elicitation: { form: {} } } });
 let tools: Tool[] = [];
 let skills: Skill[] = [];
 let busy = false;
 
+// ---------- what the assistant is doing ----------
+// The orb (also the mic button) shows it: listening, speaking, thinking or idle.
+
+const state = { listening: false, speaking: false, thinking: false };
+
+function showState() {
+  orb.dataset.state = state.listening ? "listening" : state.speaking ? "speaking" : state.thinking ? "thinking" : "idle";
+  orb.title = state.speaking ? "Stop speaking (Esc)" : state.listening ? "Stop listening" : "Speak (Chrome)";
+  $("hint").textContent = state.speaking ? "Esc stops speaking" : "";
+}
+
 // ---------- rendering ----------
+
+const SUGGESTIONS = [
+  "What's the weather in Pune right now?",
+  "What's the air quality in Delhi?",
+  "Where is the ISS right now?",
+  "Convert 100 US dollars to rupees",
+  "When is the next rocket launch?",
+];
+
+function renderChips() {
+  for (const text of SUGGESTIONS) {
+    const b = el("button", undefined, text);
+    b.type = "button";
+    b.onclick = () => void ask(text);
+    $("chips").append(b);
+  }
+}
 
 function scroll() {
   chat.scrollTop = chat.scrollHeight;
 }
 
-function addMsg(kind: "user" | "bot" | "note", text: string) {
-  const li = document.createElement("li");
-  li.className = `msg ${kind}`;
-  li.textContent = text;
+function append(li: HTMLLIElement) {
+  $("welcome").hidden = true;
+  chat.querySelector(".typing")?.remove();
   chat.append(li);
   scroll();
+}
+
+function addMsg(kind: "user" | "bot" | "note", text: string) {
+  const li = el("li", `msg ${kind}`, text);
+  append(li);
   return li;
 }
 
-function addCard(el: HTMLElement) {
-  const li = document.createElement("li");
+function addCard(card: HTMLElement) {
+  const li = el("li");
   li.style.display = "contents";
-  li.append(el);
-  chat.append(li);
-  scroll();
+  li.append(card);
+  append(li);
+}
+
+/** Three dots while the assistant works out an answer; returns a function that removes them. */
+function typing(): () => void {
+  const li = el("li", "msg bot typing");
+  li.setAttribute("aria-label", "Thinking");
+  li.append(el("i"), el("i"), el("i"));
+  append(li);
+  return () => li.remove();
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -69,28 +110,65 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 // Bookkeeping fields APIs commonly return that mean nothing to a listener.
 const HIDDEN_KEYS = new Set(["interval", "id", "generationtime_ms", "utc_offset_seconds", "elevation"]);
+const hiddenKey = (k: string) => HIDDEN_KEYS.has(k) || /(^|_)(code|id)$/i.test(k);
 
 function display(v: unknown): string {
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) {
     const d = new Date(v);
     if (!Number.isNaN(d.getTime())) return d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
   }
-  if (typeof v === "number" && !Number.isInteger(v)) return String(Math.round(v * 10) / 10);
+  if (typeof v === "number") return (Number.isInteger(v) ? v : Math.round(v * 10) / 10).toLocaleString("en-IN");
   return String(v);
 }
 
-function answerCard(skill: Skill | undefined, speech: string, data: unknown) {
-  const card = el("div", "card");
-  card.append(el("div", "card-kicker", skill ? `${skill.title} · learned skill` : "Answer"));
-  card.append(el("div", "card-title", speech));
+// Units the common keyless sources use by default (Open-Meteo: °C, %, km/h, mm).
+function unit(key: string): string {
+  const k = key.toLowerCase();
+  if (/humidity|probability|chance|percent|change/.test(k)) return "%";
+  if (/temp|feels/.test(k)) return "°";
+  if (/wind|speed|velocity/.test(k)) return " km/h";
+  if (/precip|rain/.test(k)) return " mm";
+  if (/altitude/.test(k)) return " km";
+  if (/^pm\d/.test(k)) return " µg/m³";
+  return "";
+}
+
+/** "us_aqi" → "US AQI", "pm2_5" → "PM2.5", "wind_speed" → "Wind speed". */
+const ACRONYMS = new Set(["aqi", "us", "uv", "iss", "pm10", "utc", "usd", "inr", "eur"]);
+function label(key: string): string {
+  const words = key
+    .replace(/pm2_5/i, "PM2.5")
+    .split(/[_\s]+/)
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase() === "pm2.5" ? "PM2.5" : w.toLowerCase()));
+  const text = words.join(" ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const took = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+
+function answerCard(skill: Skill, speech: string, data: unknown, footer: string) {
+  const card = el("div", "card answer");
+  card.append(el("div", "card-kicker", skill.title));
+  // The spoken answer ends with its citation; show that as a tag under the answer.
+  const at = speech.lastIndexOf("Source:");
+  card.append(el("div", "card-title", at > 0 ? speech.slice(0, at).trim() : speech));
   if (data && typeof data === "object") {
-    const dl = el("dl");
-    for (const [k, v] of Object.entries(data as Record<string, unknown>).slice(0, 8)) {
-      if (v === null || typeof v === "object" || HIDDEN_KEYS.has(k)) continue;
-      dl.append(el("dt", undefined, k.replace(/_/g, " ")), el("dd", undefined, display(v)));
+    const stats = el("div", "stats");
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      if (v === null || typeof v === "object" || hiddenKey(k) || String(v).length > 40) continue;
+      const stat = el("div", "stat");
+      stat.append(el("b", undefined, display(v) + (typeof v === "number" ? unit(k) : "")), el("span", undefined, label(k)));
+      stat.title = `${label(k)}: ${display(v)}`;
+      stats.append(stat);
+      if (stats.childElementCount === 6) break;
     }
-    if (dl.childElementCount) card.append(dl);
+    if (stats.childElementCount) card.append(stats);
   }
+  const cite = el("div", "cite");
+  if (at > 0) cite.append(el("span", "tag src", speech.slice(at).trim().replace(/\.$/, "")));
+  if (skill.crossChecked) cite.append(el("span", "tag ok", "✓ cross-checked when learned"));
+  if (cite.childElementCount) card.append(cite);
+  card.append(el("div", "via", footer));
   addCard(card);
 }
 
@@ -104,27 +182,101 @@ function renderSkills(freshName?: string) {
   $("count").textContent = String(skills.length);
   list.replaceChildren();
   if (!skills.length) {
-    list.append(el("li", "empty", "Nothing learned yet. Ask for something new."));
+    list.append(el("li", "empty", "Nothing learned yet. Ask for something new and watch it learn."));
     return;
   }
   for (const s of skills) {
     const li = el("li", s.name === freshName ? "fresh" : undefined);
-    li.append(el("div", "name", s.title), el("code", undefined, s.name));
+    const row = el("div", "row");
+    row.append(el("div", "name", s.title));
+    if (s.request) {
+      const t = el("button", "try", "Ask");
+      t.type = "button";
+      t.title = `Ask: ${s.request}`;
+      t.onclick = () => void ask(s.request!);
+      row.append(t);
+    }
+    li.append(row);
     const passed = s.tests.filter((t) => t.passed).length;
-    li.append(el("div", "meta", `${passed}/${s.tests.length} live tests · ${s.allowedDomains.join(", ")} · used ${s.uses}×`));
+    const from = s.sources?.length ? s.sources.join(", ") : s.allowedDomains.join(", ");
+    li.append(el("div", "meta", `${from} · ${passed}/${s.tests.length} tests${s.crossChecked ? " · cross-checked" : ""} · used ${s.uses}×`));
+    li.title = s.description;
     list.append(li);
   }
 }
 
 // ---------- build timeline ----------
+// In the conversation: four steps anyone can follow. In the side panel: the full log.
 
+const PHASES = ["Find a source", "Write the code", "Test & cross-check", "Your OK"];
+
+function learnCard(request: string) {
+  const card = el("div", "card learn");
+  const kicker = el("div", "card-kicker");
+  const label = el("span", undefined, "Learning a new skill");
+  const timer = el("span", "timer", "0 s");
+  kicker.append(label, timer);
+  const phases = el("ol", "phases");
+  const items = PHASES.map((p) => phases.appendChild(el("li", undefined, p)));
+  const detail = el("p", "detail", "Starting…");
+  card.append(kicker, el("div", "card-title", `“${request}”`), phases, detail);
+  addCard(card);
+
+  const t0 = performance.now();
+  let stopped: number | undefined;
+  // The clock stops when the skill is ready: waiting for the user's OK isn't learning time.
+  const seconds = () => Math.round(((stopped ?? performance.now()) - t0) / 1000);
+  const tick = setInterval(() => (timer.textContent = `${seconds()} s`), 1000);
+  const stop = () => {
+    stopped ??= performance.now();
+    clearInterval(tick);
+    timer.textContent = `${seconds()} s`;
+  };
+  let at = 0;
+  const set = (n: number, failed = false) => {
+    at = n;
+    items.forEach((li, i) => (li.className = i < n ? "done" : i === n ? (failed ? "fail" : "active") : ""));
+  };
+  set(0);
+  return {
+    step(stage: string, message: string) {
+      detail.textContent = stage === "repair" ? `Fixing: ${message}` : /^writing the code/i.test(message) ? `${message}. The slowest step: usually under a minute.` : message;
+      if (stage === "ready") stop();
+      if (stage === "submit" || stage === "repair" || (stage === "thinking" && /writing|fresh approach/i.test(message))) set(1);
+      else if (stage === "test") set(2);
+      else if (stage === "ready") set(3);
+    },
+    waiting() {
+      stop();
+      set(3);
+      detail.textContent = "Waiting for your OK";
+    },
+    end(ok: boolean, text: string) {
+      stop();
+      if (ok) {
+        items.forEach((li) => (li.className = "done"));
+        label.textContent = `Learned in ${seconds()} s`;
+        card.classList.add("learned");
+      } else {
+        set(at, true);
+        label.textContent = "Not learned";
+        card.classList.add("failed");
+      }
+      detail.textContent = text;
+    },
+  };
+}
+
+let current: ReturnType<typeof learnCard> | undefined;
 let buildStart = 0;
+
 function buildBegin(request: string) {
   buildStart = performance.now();
   $("build").hidden = false;
-  $("build-title").textContent = `Learning: “${request}”`;
+  $("build-title").textContent = `Build log: “${request}”`;
   $("spinner").className = "spinner";
   $("steps").replaceChildren();
+  current = learnCard(request);
 }
 
 function buildStep(text: string, kind: "" | "ok" | "bad" | "wait" = "") {
@@ -139,6 +291,8 @@ function buildEnd(ok: boolean, text: string) {
   building = false;
   buildStep(text, ok ? "ok" : "bad");
   $("spinner").className = `spinner ${ok ? "done" : "fail"}`;
+  current?.end(ok, text);
+  current = undefined;
 }
 
 // ---------- consent ----------
@@ -149,12 +303,14 @@ async function consentCard(cap: Skill | null, message: string, intro = "I've lea
   node.querySelector(".card-title")!.textContent = cap?.title ?? "New skill";
   node.querySelector(".card-body")!.textContent = cap?.description ?? message;
   const domains = node.querySelector(".domains")!;
-  for (const d of cap?.allowedDomains ?? []) domains.append(el("li", undefined, d));
+  for (const d of cap?.allowedDomains ?? []) domains.append(el("code", undefined, d));
   if (cap) {
     const passed = cap.tests.filter((t) => t.passed).length;
-    const checked = cap.crossChecked && cap.sources?.length ? `, answer cross-checked against ${cap.sources.join(" and ")}` : "";
-    node.querySelector(".tests")!.textContent = `${passed === cap.tests.length ? "✓" : "✗"} Passed ${passed}/${cap.tests.length} live tests in the sandbox${checked}`;
-  }
+    const tests = node.querySelector(".tests")!;
+    tests.textContent = `Passed ${passed}/${cap.tests.length} live test${cap.tests.length === 1 ? "" : "s"} in the sandbox`;
+    tests.classList.toggle("no", passed !== cap.tests.length);
+    if (cap.crossChecked && cap.sources?.length) node.querySelector(".cross")!.textContent = `Its numbers match ${cap.sources.join(" and ")}`;
+  } else node.querySelector(".checks")!.remove();
   addCard(node);
   speak(`${intro}: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);
 
@@ -163,13 +319,14 @@ async function consentCard(cap: Skill | null, message: string, intro = "I've lea
     node.querySelector<HTMLButtonElement>(".no")!.onclick = () => resolve(false);
   });
   for (const b of node.querySelectorAll("button")) b.disabled = true;
-  node.querySelector(install ? ".yes" : ".no")!.textContent = install ? "Installed" : "Declined";
+  node.querySelector(install ? ".yes" : ".no")!.textContent = install ? "Installed ✓" : "Declined";
   return install;
 }
 
 // Asked by the server (MCP elicitation) inside a build this page started.
 client.setRequestHandler(ElicitRequestSchema, async (req): Promise<ElicitResult> => {
   buildStep("Waiting for your OK", "wait");
+  current?.waiting();
   const cap = (req.params._meta?.["forge/capability"] ?? null) as Skill | null;
   return { action: "accept", content: { install: await consentCard(cap, req.params.message) } };
 });
@@ -210,6 +367,7 @@ client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
   if (n.params.logger === "forge" && d?.stage === "skill_failed" && d.message) return void say(d.message);
   if (!building || n.params.logger !== "forge" || !d?.message) return;
   buildStep(d.message, STEP_KIND[d.stage ?? ""] ?? "");
+  current?.step(d.stage ?? "", d.message);
 });
 
 // ---------- routing ----------
@@ -255,6 +413,8 @@ interface Routed {
   skill: Skill;
   input: Record<string, unknown>;
   missing: string[];
+  /** Who picked the skill, for the answer card. */
+  via?: string;
 }
 
 /** Which skill answers `utterance`, with what inputs. With `only`, just fills that skill's inputs. */
@@ -272,19 +432,18 @@ async function route(utterance: string, only?: Skill): Promise<Routed | undefine
     return skill && { skill, ...extractInput(utterance, skill) };
   }
   const skill = skills.find((s) => s.name === r.skill);
-  const took = `${((r.ms ?? 0) / 1000).toFixed(1)} s`;
-  addMsg("note", skill ? `${r.by} picked ${skill.name} ${JSON.stringify(r.input)} in ${took}` : `${r.by}: no learned skill fits (${took})`);
-  return skill && { skill, input: r.input ?? {}, missing: r.missing ?? [] };
+  return skill && { skill, input: r.input ?? {}, missing: r.missing ?? [], via: `${r.by} picked ${skill.name} ${JSON.stringify(r.input)} in ${took(r.ms ?? 0)}` };
 }
 
 // ---------- the conversation ----------
 
-async function useSkill({ skill, input, missing }: Routed) {
+async function useSkill({ skill, input, missing, via }: Routed) {
   if (missing.length) {
     say(`I can do that with ${skill.title}, but I need the ${missing.join(" and ")}.`);
     return;
   }
   const direct = tools.some((t) => t.name === skill.name);
+  const t0 = performance.now();
   const res = (await client.callTool(
     direct ? { name: skill.name, arguments: input } : { name: "use_skill", arguments: { name: skill.name, input } },
   )) as CallToolResult;
@@ -295,7 +454,8 @@ async function useSkill({ skill, input, missing }: Routed) {
     addMsg("note", String((res.content[0] as { text?: string })?.text ?? "").slice(0, 300));
     return;
   }
-  answerCard(skill, sc.speech, sc.data);
+  const ran = `ran in the sandbox in ${took(performance.now() - t0)}`;
+  answerCard(skill, sc.speech, sc.data, via ? `${via} · ${ran}` : `Learned skill · ${ran}`);
   speak(sc.speech);
   void refresh();
 }
@@ -349,8 +509,11 @@ async function learnThenAnswer(utterance: string) {
 async function ask(utterance: string) {
   if (busy || !utterance.trim()) return;
   busy = true;
-  ring.className = "ring busy";
+  state.thinking = true;
+  showState();
+  stopSpeaking();
   addMsg("user", utterance);
+  const doneTyping = typing();
   try {
     const routed = await route(utterance);
     if (routed) await useSkill(routed);
@@ -361,8 +524,10 @@ async function ask(utterance: string) {
     say("Sorry, something went wrong.");
     addMsg("note", e instanceof Error ? e.message : String(e));
   } finally {
+    doneTyping();
     busy = false;
-    ring.className = "ring";
+    state.thinking = false;
+    showState();
   }
 }
 
@@ -377,59 +542,66 @@ $("ask").addEventListener("submit", (e) => {
 
 type Recognition = { lang: string; interimResults: boolean; start(): void; stop(): void; onresult: (e: any) => void; onend: () => void; onerror: (e: any) => void };
 const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
-const mic = $<HTMLButtonElement>("mic");
-if (!SR) {
-  mic.disabled = true;
-  mic.title = "Voice input needs Chrome";
-} else {
-  let rec: Recognition | undefined;
-  mic.onclick = () => {
-    if (rec) return rec.stop();
-    stopSpeaking();
-    rec = new SR() as Recognition;
-    rec.lang = "en-IN";
-    rec.interimResults = true;
-    mic.classList.add("on");
-    ring.className = "ring listening";
-    rec.onresult = (e) => {
-      const r = e.results[e.results.length - 1];
-      input.value = r[0].transcript;
-      if (r.isFinal) {
-        input.value = "";
-        void ask(r[0].transcript);
-      }
-    };
-    rec.onerror = (e) => addMsg("note", `Mic: ${e.error}`);
-    rec.onend = () => {
-      rec = undefined;
-      mic.classList.remove("on");
-      if (!busy) ring.className = "ring";
-    };
-    rec.start();
+let rec: Recognition | undefined;
+orb.onclick = () => {
+  if (state.speaking) return stopSpeaking();
+  if (rec) return rec.stop();
+  if (!SR) return addMsg("note", "Voice input needs Chrome. You can type instead.");
+  rec = new SR() as Recognition;
+  rec.lang = "en-IN";
+  rec.interimResults = true;
+  state.listening = true;
+  showState();
+  rec.onresult = (e) => {
+    const r = e.results[e.results.length - 1];
+    input.value = r[0].transcript;
+    if (r.isFinal) {
+      input.value = "";
+      void ask(r[0].transcript);
+    }
   };
-}
+  rec.onerror = (e) => e.error !== "no-speech" && e.error !== "aborted" && addMsg("note", `Mic: ${e.error}`);
+  rec.onend = () => {
+    rec = undefined;
+    state.listening = false;
+    showState();
+  };
+  rec.start();
+};
 
 // ---------- voice out ----------
 
-setupVoice({ picker: $<HTMLSelectElement>("voice"), status: $("voiceStatus"), enabled: () => $<HTMLInputElement>("speak").checked });
+setupVoice({
+  picker: $<HTMLSelectElement>("voice"),
+  status: $("voiceStatus"),
+  enabled: () => $<HTMLInputElement>("speak").checked,
+  onSpeaking: (on) => {
+    state.speaking = on;
+    showState();
+  },
+});
 $<HTMLInputElement>("speak").addEventListener("change", (e) => (e.target as HTMLInputElement).checked || stopSpeaking());
+document.addEventListener("keydown", (e) => e.key === "Escape" && stopSpeaking());
 
 // ---------- start ----------
 
+renderChips();
+showState();
 (async () => {
   const conn = $("conn");
   try {
     const transport = new StreamableHTTPClientTransport(new URL("/mcp", location.origin));
     await client.connect(transport);
-    conn.textContent = `connected · ${client.getServerVersion()?.title ?? client.getServerVersion()?.name}`;
+    conn.lastElementChild!.textContent = "Connected";
+    conn.title = `MCP server: ${client.getServerVersion()?.title ?? client.getServerVersion()?.name}`;
     conn.className = "conn ok";
     $("proto").textContent = transport.protocolVersion ?? "";
     const health = await (await fetch("/health")).json();
-    $("mode").textContent = `${health.provider}/${health.model}`;
+    $("mode").textContent = health.provider === "ollama" ? `${health.model} · on this laptop` : `${health.provider} · ${health.model}`;
     await refresh();
-    addMsg("note", "Ask me something. If I can't do it yet, I'll learn how.");
   } catch (e) {
-    conn.textContent = `not connected: ${e instanceof Error ? e.message : e}`;
+    conn.lastElementChild!.textContent = "Not connected";
+    conn.title = e instanceof Error ? e.message : String(e);
     conn.className = "conn bad";
   }
 })();
