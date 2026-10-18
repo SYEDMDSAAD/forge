@@ -168,7 +168,12 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
   if (at > 0) cite.append(el("span", "tag src", speech.slice(at).trim().replace(/\.$/, "")));
   if (skill.crossChecked) cite.append(el("span", "tag ok", "✓ cross-checked when learned"));
   if (cite.childElementCount) card.append(cite);
-  card.append(el("div", "via", footer));
+  const via = el("div", "via", footer);
+  const more = el("button", "more", "How I got this");
+  more.type = "button";
+  more.onclick = () => void openSkill(skill.name);
+  via.append(more);
+  card.append(via);
   addCard(card);
 }
 
@@ -188,7 +193,10 @@ function renderSkills(freshName?: string) {
   for (const s of skills) {
     const li = el("li", s.name === freshName ? "fresh" : undefined);
     const row = el("div", "row");
-    row.append(el("div", "name", s.title));
+    const name = el("div", "name", s.title);
+    name.title = "See how this skill works";
+    name.onclick = () => void openSkill(s.name);
+    row.append(name);
     if (s.request) {
       const t = el("button", "try", "Ask");
       t.type = "button";
@@ -200,7 +208,6 @@ function renderSkills(freshName?: string) {
     const passed = s.tests.filter((t) => t.passed).length;
     const from = s.sources?.length ? s.sources.join(", ") : s.allowedDomains.join(", ");
     li.append(el("div", "meta", `${from} · ${passed}/${s.tests.length} tests${s.crossChecked ? " · cross-checked" : ""} · used ${s.uses}×`));
-    li.title = s.description;
     list.append(li);
   }
 }
@@ -309,7 +316,7 @@ async function consentCard(cap: Skill | null, message: string, intro = "I've lea
     const tests = node.querySelector(".tests")!;
     tests.textContent = `Passed ${passed}/${cap.tests.length} live test${cap.tests.length === 1 ? "" : "s"} in the sandbox`;
     tests.classList.toggle("no", passed !== cap.tests.length);
-    if (cap.crossChecked && cap.sources?.length) node.querySelector(".cross")!.textContent = `Its numbers match ${cap.sources.join(" and ")}`;
+    if (cap.crossChecked && cap.sources?.length) node.querySelector(".cross")!.textContent = `Its answer was cross-checked against ${cap.sources.join(" and ")}`;
   } else node.querySelector(".checks")!.remove();
   addCard(node);
   speak(`${intro}: ${cap?.title ?? "it"}. It will only access ${(cap?.allowedDomains ?? []).join(" and ")}. Should I install it?`);
@@ -432,8 +439,113 @@ async function route(utterance: string, only?: Skill): Promise<Routed | undefine
     return skill && { skill, ...extractInput(utterance, skill) };
   }
   const skill = skills.find((s) => s.name === r.skill);
-  return skill && { skill, input: r.input ?? {}, missing: r.missing ?? [], via: `${r.by} picked ${skill.name} ${JSON.stringify(r.input)} in ${took(r.ms ?? 0)}` };
+  if (!skill) return undefined;
+  const via = only ? `Answered with the skill it just learned, ${skill.name} ${JSON.stringify(r.input ?? {})}` : `${r.by} picked ${skill.name} ${JSON.stringify(r.input)} in ${took(r.ms ?? 0)}`;
+  return { skill, input: r.input ?? {}, missing: r.missing ?? [], via };
 }
+
+// ---------- what Forge did, in full ----------
+// Both panels read MCP resources, so any client can show the same evidence.
+
+let health: { provider?: string; model?: string; smith?: string; sandbox?: string; attempts?: number; voice?: boolean } = {};
+
+async function resource<T>(uri: string): Promise<T> {
+  const res = await client.readResource({ uri });
+  return JSON.parse(String((res.contents[0] as { text?: string }).text ?? "null")) as T;
+}
+
+async function openHow() {
+  const local = health.provider === "ollama";
+  $("how-model").textContent = local ? `A free local model (${health.model}, running on this laptop)` : `The model (${health.model})`;
+  $("how-attempts").textContent = String(health.attempts ?? 4);
+  $("how-sandbox").textContent = health.sandbox === "docker" ? "a container with no network of its own" : "a separate process (Docker is off on this machine, so it is less isolated)";
+  const list = $("sources");
+  if (!list.childElementCount) {
+    try {
+      const sources = await resource<{ name: string; useFor: string; domains: string[]; crossChecked: boolean }[]>("forge://sources");
+      for (const src of sources) {
+        const li = el("li");
+        li.append(el("b", undefined, src.name + (src.crossChecked ? " ✓" : "")), document.createTextNode(src.useFor + " "), el("code", undefined, src.domains.join(", ")));
+        if (src.crossChecked) li.title = "Numbers from this source are cross-checked";
+        list.append(li);
+      }
+    } catch {
+      list.append(el("li", undefined, "Couldn't load the list of sources."));
+    }
+  }
+  const models = $("models");
+  models.replaceChildren();
+  const item = (what: string, how: string) => {
+    const li = el("li");
+    li.append(el("b", undefined, what), document.createTextNode(` ${how}`));
+    models.append(li);
+  };
+  item("Writes and repairs skills:", local ? `${health.model} via Ollama, in short steps each constrained to a JSON schema` : `${health.model} (${health.provider})`);
+  item("Picks which skill answers:", `${local ? health.model : "the same provider"}, checking each pick with a yes/no question`);
+  item("Speaks:", health.voice ? "Kokoro (82M parameters), on this laptop's CPU" : "the browser's built-in voice");
+  $<HTMLDialogElement>("how").showModal();
+}
+
+interface SkillRecord extends Skill {
+  attempts?: number;
+  createdAt?: string;
+  spec: { code: string; inputSchema: Skill["inputSchema"]; tests: { input: Record<string, unknown> }[] };
+  testReport: {
+    fetched: string[];
+    results: { passed: boolean; durationMs: number; result?: { speech?: string }; error?: string; crossCheck?: { said?: number; source?: number; skipped?: string } }[];
+  };
+}
+
+async function openSkill(name: string) {
+  let rec: SkillRecord;
+  try {
+    rec = await resource<SkillRecord>(`forge://capabilities/${name}`);
+  } catch {
+    return addMsg("note", `Couldn't load the details of ${name}.`);
+  }
+  $("skill-title").textContent = rec.title;
+  $("skill-desc").textContent = rec.description;
+  const facts = $("skill-facts");
+  facts.replaceChildren();
+  const fact = (term: string, ...value: (string | Node)[]) => {
+    const dd = el("dd");
+    dd.append(...value);
+    facts.append(el("dt", undefined, term), dd);
+    return dd;
+  };
+  const code = (t: string) => el("code", undefined, t);
+  if (rec.request) fact("You asked", `“${rec.request}”`);
+  fact("Tool", code(rec.name));
+  const inputs = Object.entries(rec.spec.inputSchema.properties ?? {});
+  fact("Inputs", ...(inputs.length ? inputs.flatMap(([k, p]) => [code(k), ` (${p.type ?? "string"})${p.description ? `: ${p.description}` : ""}`, el("br")]) : ["none"]));
+  fact("Live data from", `${(rec.sources ?? []).join(", ") || "—"} `, ...rec.allowedDomains.map((d) => code(d + " ")));
+  const r = rec.testReport.results[0];
+  const test = rec.spec.tests[0];
+  if (r && test) {
+    const dd = fact("Live test", `${JSON.stringify(test.input)} → `);
+    dd.append(el("span", r.passed ? "ok" : "bad", r.passed ? `passed in ${took(r.durationMs)}` : `failed: ${r.error ?? ""}`));
+    if (r.result?.speech) fact("It answered", `“${r.result.speech}”`);
+    const c = r.crossCheck;
+    if (typeof c?.said === "string") fact("Cross-check", el("span", "ok", `✓ the answer quotes “${c.said}”, a headline in the ${rec.sources?.join(" and ") ?? "source"} feed it read`));
+    else if (c?.source !== undefined) fact("Cross-check", el("span", "ok", `✓ the answer said ${c.said}; ${rec.sources?.join(" and ") ?? "the source"} reported ${c.source}`));
+    else if (c?.skipped) fact("Cross-check", `skipped: ${c.skipped}`);
+    else if (rec.crossChecked) fact("Cross-check", el("span", "ok", "✓ matched the source"));
+    else fact("Cross-check", "none for this source (its answers aren't numbers Forge has a reference for)");
+  }
+  const fetched = [...new Set(rec.testReport.fetched ?? [])];
+  if (fetched.length) fact("Live requests in the test", ...fetched.slice(0, 6).flatMap((u) => [code(u), el("br")]));
+  fact("Built", `${rec.attempts ?? 1} attempt${rec.attempts === 1 ? "" : "s"}${rec.createdAt ? ` · ${new Date(rec.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""} · used ${rec.uses}×`);
+  $("skill-code").textContent = rec.spec.code;
+  const askBtn = $<HTMLButtonElement>("skill-ask");
+  askBtn.hidden = !rec.request;
+  askBtn.onclick = () => {
+    $<HTMLDialogElement>("skill").close();
+    void ask(rec.request!);
+  };
+  $<HTMLDialogElement>("skill").showModal();
+}
+
+$("howBtn").onclick = () => void openHow();
 
 // ---------- the conversation ----------
 
@@ -596,7 +708,7 @@ showState();
     conn.title = `MCP server: ${client.getServerVersion()?.title ?? client.getServerVersion()?.name}`;
     conn.className = "conn ok";
     $("proto").textContent = transport.protocolVersion ?? "";
-    const health = await (await fetch("/health")).json();
+    health = await (await fetch("/health")).json();
     $("mode").textContent = health.provider === "ollama" ? `${health.model} · on this laptop` : `${health.provider} · ${health.model}`;
     await refresh();
   } catch (e) {

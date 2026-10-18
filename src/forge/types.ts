@@ -8,7 +8,7 @@ export interface ToolTest {
 }
 
 export interface Reference {
-  /** ES module whose default export `async (input) => number[]` returns the values the source reports. */
+  /** ES module whose default export `async (input, { fetched }) => (number | string)[]` returns the values (or headlines) the source reports; `fetched` lists the URLs the skill requested. */
   code: string;
   relTol?: number;
   absTol?: number;
@@ -34,6 +34,8 @@ export interface TestResult {
   error?: string;
   durationMs: number;
   result?: unknown;
+  /** What the cross-check compared: a number in the answer and the source's own value. */
+  crossCheck?: { said?: number | string; source?: number | string; tolerance?: number; skipped?: string };
 }
 
 export interface TestReport {

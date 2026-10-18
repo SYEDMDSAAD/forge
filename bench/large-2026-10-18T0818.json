@@ -1,0 +1,72 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 2,
+  "rows": [
+    {
+      "run": 1,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 131.438,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: - speech is an apology, but the example input is valid: the request or the parsi)"
+    },
+    {
+      "run": 1,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 40.048,
+      "attempts": 1,
+      "skill": "get_latest_news",
+      "speech": "Latest news on ISRO: Development of LOX-Methane engine in ISRO - ISRO; TRISHNA satellite is in advanced stage of realisation, says ISRO official - The Hindu; Strengthening India’s Space Sovereignty - Press Information Bureau."
+    },
+    {
+      "run": 1,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 58.012,
+      "attempts": 2,
+      "skill": "get_cricket_news",
+      "speech": "Today's cricket news for the India team includes: India vs West Indies: Fifth T20 International – teams, start, lineups, Hope - Al Jazeera; India vs West Indies 5th T20 2026: Where to watch IND vs WI live streaming and telecast - Olympics; Asian Games: Indian Women’s Cricket Team Wins Country’s First Gold in Aichi: Akashvani News - News On AIR."
+    },
+    {
+      "run": 2,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 87.176,
+      "attempts": 3,
+      "skill": "get_latest_launches",
+      "speech": "Latest news on Elon Musk's recent car launches: Elon Musk's Tesla Roadster Flies, Flips Mid-Air Using SpaceX Tech: Science Explained - NDTV; SpaceX thrusters just made a Tesla Roadster 'fly' (and Elon Musk's car is still out there in space) - Space; Elon Musk reveals ‘world’s first flying car’ at Tesla event - The Guardian."
+    },
+    {
+      "run": 2,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 33.756,
+      "attempts": 1,
+      "skill": "get_latest_isro_news",
+      "speech": "Latest news on ISRO: Development of LOX-Methane engine in ISRO - ISRO; TRISHNA satellite is in advanced stage of realisation, says ISRO official - The Hindu; Strengthening India’s Space Sovereignty - Press Information Bureau."
+    },
+    {
+      "run": 2,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 32.378,
+      "attempts": 1,
+      "skill": "get_cricket_news",
+      "speech": "Latest news on the India cricket team: India vs West Indies: Fifth T20 International – teams, start, lineups, Hope - Al Jazeera; India vs West Indies 5th T20 2026: Where to watch IND vs WI live streaming and telecast - Olympics; Asian Games: Indian Women’s Cricket Team Wins Country’s First Gold in Aichi: Akashvani News - News On AIR."
+    }
+  ]
+}

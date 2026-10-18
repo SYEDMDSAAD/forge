@@ -14,6 +14,7 @@ import * as z from "zod/v4";
 import { ForgeFailed, forgeTool } from "./forge/smith.js";
 import { Registry } from "./forge/registry.js";
 import { sourcesOf } from "./forge/export.js";
+import { CATALOG } from "./forge/catalog.js";
 import type { Capability, ForgeEvent } from "./forge/types.js";
 import { runInSandbox } from "./sandbox/sandbox.js";
 import { config } from "./config.js";
@@ -489,6 +490,22 @@ export function createServer(): McpServer {
       registry.remove(cap.id);
       return withNews(text(`Forgot "${cap.spec.title}".`, { status: "removed" }));
     },
+  );
+
+  // Where live data can come from: the verified, keyless sources new skills are built on.
+  mcp.registerResource(
+    "sources",
+    "forge://sources",
+    { title: "Verified live data sources", description: "The public, keyless APIs Forge builds new skills on", mimeType: "application/json" },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(CATALOG.map((s) => ({ id: s.id, name: s.name, useFor: s.useFor, domains: s.domains, crossChecked: Boolean(s.reference) }))),
+        },
+      ],
+    }),
   );
 
   // Full source and test evidence of every learned skill, for transparency.

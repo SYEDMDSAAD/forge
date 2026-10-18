@@ -1,0 +1,66 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 2,
+  "rows": [
+    {
+      "run": 1,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 89.487,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Static check failed: syntax error at line 8)"
+    },
+    {
+      "run": 1,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 90.276,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Static check failed: syntax error at line 8)"
+    },
+    {
+      "run": 1,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 116.623,
+      "attempts": 1,
+      "skill": "get_cricket_news",
+      "speech": "Latest news on India cricket team: India vs West Indies: Fifth T20 International – teams, start, lineups, Hope - Al Jazeera; India vs West Indies 5th T20 2026: Where to watch IND vs WI live streaming and telecast - Olympics; Asian Games: Indian Women’s Cricket Team Wins Country’s First Gold in Aichi: Akashvani News - News On AIR."
+    },
+    {
+      "run": 2,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 55.446,
+      "attempts": 2,
+      "skill": "get_latest_launches",
+      "speech": "Elon Musk has recently launched the Elon Musk's Tesla Roadster Flies, Flips Mid-Air Using SpaceX Tech: Science Explained - NDTV."
+    },
+    {
+      "run": 2,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 65.571,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Static check failed: syntax error at line 8)"
+    },
+    {
+      "run": 2,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 66.435,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Static check failed: syntax error at line 8)"
+    }
+  ]
+}

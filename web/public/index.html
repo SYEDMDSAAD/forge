@@ -10,6 +10,7 @@
   <header class="top">
     <div class="brand"><span class="mark"></span>Forge <small>the assistant that learns</small></div>
     <div class="status">
+      <button type="button" class="link" id="howBtn">How it works</button>
       <span class="pill" id="mode" title="The model that writes new skills">–</span>
       <span class="conn" id="conn"><i></i><span>Connecting…</span></span>
     </div>
@@ -52,13 +53,42 @@
         <h3>Every new skill</h3>
         <ul>
           <li><b>Runs in a sandbox</b> and can reach only the sites it declared.</li>
-          <li><b>Passes a live test</b> first; numbers from known sources are cross-checked too.</li>
+          <li><b>Passes a live test</b> first, and its answer is cross-checked against the source where Forge has a reference.</li>
           <li><b>Waits for your OK</b> before it is installed, and cites its source in every answer.</li>
         </ul>
       </div>
       <p class="proto">MCP <span id="proto">–</span> · Streamable HTTP</p>
     </aside>
   </main>
+
+  <dialog class="sheet" id="how" aria-labelledby="how-title">
+    <form method="dialog"><button class="close" aria-label="Close">✕</button></form>
+    <h2 id="how-title">How Forge learns a new skill</h2>
+    <ol class="flow">
+      <li><b>Understand.</b> <span id="how-model">The model</span> reads your request and picks one of the verified live sources below, or says no if it needs a login, payment or private data.</li>
+      <li><b>Look.</b> It calls that source's real API and reads the actual response, so the code is written against real data, not guesses.</li>
+      <li><b>Write.</b> It writes a small JavaScript skill: one function that takes your inputs (a city, an amount…) and returns a spoken answer.</li>
+      <li><b>Test, live.</b> The skill runs in a sandbox, <span id="how-sandbox">a container with no network of its own</span>. Each request goes through Forge, which allows only the sites the skill declared and blocks private addresses. The test uses your own example, with real data.</li>
+      <li><b>Cross-check.</b> For sources marked ✓ below, Forge's own trusted reference reads the same values from the source (a temperature, a rate, today's headlines); the answer must match them. Anything that fails is repaired and retried, up to <span id="how-attempts">4</span> attempts, or it is not kept.</li>
+      <li><b>Your OK.</b> You see what it does, its test result and every site it can reach. It is installed only if you say yes, and every answer cites its source.</li>
+    </ol>
+    <h3>Where real-time data comes from</h3>
+    <p class="muted">Every answer is fetched live from the source when you ask. A repeat within 10 minutes reuses the source's last reply; if a source is down, I say how old the answer is (2 hours at most). ✓ means its answers are cross-checked.</p>
+    <ul class="sources" id="sources"></ul>
+    <h3>Models on this laptop</h3>
+    <ul class="models" id="models"></ul>
+  </dialog>
+
+  <dialog class="sheet" id="skill" aria-labelledby="skill-title">
+    <form method="dialog"><button class="close" aria-label="Close">✕</button></form>
+    <div class="card-kicker">Learned skill</div>
+    <h2 id="skill-title"></h2>
+    <p class="muted" id="skill-desc"></p>
+    <dl class="facts" id="skill-facts"></dl>
+    <h3>The code it wrote</h3>
+    <pre class="code"><code id="skill-code"></code></pre>
+    <div class="actions"><button class="yes" id="skill-ask">Ask it</button></div>
+  </dialog>
 
   <template id="consent-tpl">
     <div class="card consent">

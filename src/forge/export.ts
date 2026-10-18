@@ -24,7 +24,7 @@ export function sourcesOf(cap: Capability): string[] {
 
 // Shared by server.mjs and test.mjs. Kept dependency-free and short enough to review.
 const LIB = `// Runtime for this skill: a fetch limited to the declared sites, the answer
-// clean-up and source citation Forge applied, and the numeric cross-check.
+// clean-up and source citation Forge applied, and the cross-check.
 import { readFileSync } from "node:fs";
 
 export const manifest = JSON.parse(readFileSync(new URL("./forge-export.json", import.meta.url), "utf8"));
@@ -32,9 +32,13 @@ export const manifest = JSON.parse(readFileSync(new URL("./forge-export.json", i
 const realFetch = globalThis.fetch;
 const allowed = (host) => manifest.tool.allowedDomains.some((d) => host === d || host.endsWith("." + d));
 
+/** URLs the skill requested since the last reset, for the cross-check. */
+export const requested = [];
+
 /** fetch that refuses any site the skill didn't declare, on every redirect hop. */
 globalThis.fetch = async function guardedFetch(input, init = {}) {
   let url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+  requested.push(url.href);
   for (let hop = 0; hop <= 5; hop++) {
     if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Blocked protocol " + url.protocol);
     if (!allowed(url.hostname)) throw new Error(url.hostname + " is not one of this skill's declared sites");
@@ -52,6 +56,7 @@ export const withTimeout = (promise, ms, label) =>
 export const tidySpeech = (speech) =>
   speech
     .replace(/\\s*\\n+\\s*/g, " ")
+    .replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e) => ({ amp: "&", quot: '"', "#39": "'", apos: "'", lt: "<", gt: ">" })[e])
     .replace(/\\s+\\|\\s+/g, ": ")
     .replace(/\\b(\\w+)(\\s+\\1\\b)+/gi, "$1")
     .replace(/(?<!\\.)\\.\\.(?!\\.)/g, ".")
@@ -81,12 +86,21 @@ export function checkInput(input) {
 
 const numbersIn = (text) => (text.match(/-?\\d[\\d,]*(?:\\.\\d+)?/g) ?? []).map((n) => Number(n.replace(/,/g, ""))).filter(Number.isFinite);
 
-/** Compares the numbers in the answer with what the source itself reports; returns a reason on mismatch. */
-export async function crossCheck(speech, test) {
-  const said = numbersIn(speech);
-  if (!said.length || !test.reference) return null;
+const plain = (text) => String(text).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Compares the answer with what the source itself reports (its numbers, or its
+ * current headlines); returns a reason on mismatch. fetched: the URLs the skill requested.
+ */
+export async function crossCheck(speech, test, fetched = []) {
+  if (!test.reference) return null;
   const reference = (await import("data:text/javascript;base64," + Buffer.from(test.reference.code).toString("base64"))).default;
-  const expected = (await withTimeout(reference(test.input ?? {}), 15000, "Reference check")).filter(Number.isFinite);
+  const values = await withTimeout(reference(test.input ?? {}, { fetched }), 15000, "Reference check");
+  const texts = values.filter((v) => typeof v === "string" && v.length >= 12);
+  if (texts.length) return texts.some((t) => plain(speech).includes(plain(t).slice(0, 32))) ? null : "the answer quotes none of the source's current headlines";
+  const said = numbersIn(speech);
+  if (!said.length) return null;
+  const expected = values.filter(Number.isFinite);
   if (!expected.length) return null;
   const { relTol = 0.03, absTol = 0 } = test.reference;
   if (said.some((a) => expected.some((b) => Math.abs(a - b) <= Math.max(absTol, Math.abs(b) * relTol)))) return null;
@@ -143,17 +157,19 @@ app.listen(port, () => console.log(tool.title + " MCP server on http://localhost
 
 const TEST = `// Runs the skill's tests live, including the cross-check against the source.
 //   npm test
-import { crossCheck, manifest, tidySpeech, withTimeout } from "./lib.mjs";
+import { crossCheck, manifest, requested, tidySpeech, withTimeout } from "./lib.mjs";
 import run from "./skill.mjs";
 
 let failed = 0;
 for (const test of manifest.tests) {
   const t0 = Date.now();
   try {
+    requested.length = 0;
     const result = await withTimeout(run(test.input ?? {}), 15000, test.name);
+    const fetched = [...requested];
     const speech = tidySpeech(String(result.speech));
     const check = new Function("result", "input", '"use strict"; return (' + test.assert + ");");
-    const problem = !check({ ...result, speech }, test.input) ? "assertion was false: " + test.assert : await crossCheck(speech, test);
+    const problem = !check({ ...result, speech }, test.input) ? "assertion was false: " + test.assert : await crossCheck(speech, test, fetched);
     const ms = Date.now() - t0;
     console.log((problem ? "FAIL " : "PASS ") + test.name + " (" + ms + " ms" + (ms > 500 ? ", over Alexa+'s 500 ms" : "") + ")\\n     " + (problem ?? speech));
     if (problem) failed++;
@@ -193,7 +209,7 @@ A standalone MCP server with one tool, \`${cap.spec.name}\`. It was learned by [
 | Inputs | ${props.length ? props.map(([k, p]) => `\`${k}\` (${p.type ?? "string"}): ${p.description ?? ""}`).join("<br>") : "none"} |
 | Sites it may reach | ${cap.spec.allowedDomains.map((d) => `\`${d}\``).join(", ")} (enforced in \`lib.mjs\`, on every redirect) |
 | Cited source | ${sources.join(", ")} |
-| Tests when learned | ${passed}/${cap.testReport.results.length} passed live${crossChecked ? ", numbers cross-checked against the source" : ""} |
+| Tests when learned | ${passed}/${cap.testReport.results.length} passed live${crossChecked ? ", answer cross-checked against the source" : ""} |
 
 ## Run
 

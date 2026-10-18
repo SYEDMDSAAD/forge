@@ -36,8 +36,12 @@ const logs = [];
 const capture = (...args) => logs.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
 console.log = console.info = console.warn = console.error = console.debug = capture;
 
+// URLs the skill itself requested in the current test, for the cross-check.
+let requested = [];
+
 globalThis.fetch = async (resource, init = {}) => {
   const url = typeof resource === "string" || resource instanceof URL ? String(resource) : resource.url;
+  requested.push(url);
   const headers = Object.fromEntries(new Headers(init.headers ?? {}));
   const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer()).toString("base64");
   const id = nextId++;
@@ -78,6 +82,7 @@ async function loadTool(code) {
 const tidySpeech = (speech) =>
   speech
     .replace(/\s*\n+\s*/g, " ")
+    .replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e) => ({ amp: "&", quot: '"', "#39": "'", apos: "'", lt: "<", gt: ">" })[e])
     .replace(/\s+\|\s+/g, ": ")
     .replace(/\b(\w+)(\s+\1\b)+/gi, "$1")
     .replace(/(?<!\.)\.\.(?!\.)/g, ".")
@@ -88,21 +93,48 @@ const tidySpeech = (speech) =>
 
 const tidy = (result) => (result && typeof result.speech === "string" ? { ...result, speech: tidySpeech(result.speech) } : result);
 
+// Headlines compared without case, entities or punctuation differences.
+const plain = (text) =>
+  String(text)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
 const numbersIn = (text) =>
   (text.match(/-?\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => Number(n.replace(/,/g, ""))).filter(Number.isFinite);
 
-/** Compare the numbers in the answer with what the source itself reports. Returns a reason on mismatch. */
-async function crossCheck(speech, test) {
-  const said = numbersIn(speech);
-  if (!said.length) return null; // nothing numeric to verify
+/**
+ * Compare the numbers in the answer with what the source itself reports.
+ * Returns what was compared (shown to the user) and, on a mismatch, the reason.
+ */
+async function crossCheck(speech, test, fetched) {
   const reference = await loadTool(test.reference.code);
-  const expected = (await withTimeout(reference(test.input ?? {}), job.timeoutMs, "Reference check")).filter(Number.isFinite);
-  if (!expected.length) return null;
+  const values = await withTimeout(reference(test.input ?? {}, { fetched }), job.timeoutMs, "Reference check");
+  // Text the source reports (headlines): the answer must quote at least one.
+  const texts = values.filter((v) => typeof v === "string" && v.length >= 12);
+  if (texts.length) {
+    const hit = texts.find((t) => plain(speech).includes(plain(t).slice(0, 32)));
+    if (hit) return { said: hit.slice(0, 120), source: "a current headline" };
+    return { error: `Cross-check failed: the answer quotes none of the headlines the source reports right now, such as "${texts[0]}". Read the titles from the response and say them.` };
+  }
+  const said = numbersIn(speech);
+  if (!said.length) return { skipped: "the answer has no numbers to check" };
+  const expected = values.filter(Number.isFinite);
+  if (!expected.length) return { skipped: "the source gave nothing to compare for this input" };
   const { relTol = 0.03, absTol = 0 } = test.reference;
   const close = (a, b) => Math.abs(a - b) <= Math.max(absTol, Math.abs(b) * relTol);
-  if (said.some((a) => expected.some((b) => close(a, b)))) return null;
   const round = (n) => Math.round(n * 100) / 100;
-  return `Cross-check failed: the answer says ${said.join(", ")}, but the source reports ${expected.slice(0, 8).map(round).join(", ")} for this input. A value is computed or read wrongly.`;
+  for (const a of said) {
+    const b = expected.find((x) => close(a, x));
+    if (b !== undefined) return { said: a, source: round(b), tolerance: relTol };
+  }
+  return {
+    said: said[0],
+    error: `Cross-check failed: the answer says ${said.join(", ")}, but the source reports ${expected.slice(0, 8).map(round).join(", ")} for this input. A value is computed or read wrongly.`,
+  };
 }
 
 async function main() {
@@ -130,18 +162,22 @@ async function main() {
     for (const test of job.tests) {
       const started = Date.now();
       try {
+        requested = [];
         const result = tidy(await withTimeout(run(test.input ?? {}), job.timeoutMs, `Test "${test.name}"`));
+        const fetched = [...requested];
         if (!result || typeof result.speech !== "string" || !result.speech.trim()) {
           throw new Error("Tool must return an object with a non-empty `speech` string");
         }
         const check = new Function("result", "input", `"use strict"; return (${test.assert});`);
         let passed = Boolean(check(result, test.input));
         let error = passed ? undefined : `Assertion was false: ${test.assert}`;
+        let checked;
         if (passed && test.reference) {
-          const mismatch = await crossCheck(result.speech, test);
+          const { error: mismatch, ...rest } = await crossCheck(result.speech, test, fetched);
+          checked = rest;
           if (mismatch) [passed, error] = [false, mismatch];
         }
-        results.push({ name: test.name, passed, durationMs: Date.now() - started, result, ...(error ? { error } : {}) });
+        results.push({ name: test.name, passed, durationMs: Date.now() - started, result, ...(checked ? { crossCheck: checked } : {}), ...(error ? { error } : {}) });
       } catch (e) {
         results.push({ name: test.name, passed: false, durationMs: Date.now() - started, error: errorText(e) });
       }

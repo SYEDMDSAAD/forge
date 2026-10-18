@@ -95,7 +95,17 @@ app.post("/voice", async (req: Request, res: Response) => {
 app.use(express.static(fileURLToPath(new URL("../web/public", import.meta.url))));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, provider: config.provider, model: config.model, sandbox: config.sandbox, skills: registry.active().length, sessions: transports.size });
+  res.json({
+    ok: true,
+    provider: config.provider,
+    model: config.model,
+    smith: config.smith,
+    sandbox: config.sandbox,
+    attempts: config.maxSubmissions,
+    voice: config.voice && voiceState.ready,
+    skills: registry.active().length,
+    sessions: transports.size,
+  });
 });
 
 warmSandbox();

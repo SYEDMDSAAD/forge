@@ -95,6 +95,21 @@ const CRYPTO_REFERENCE: Reference = {
   relTol: 0.03,
 };
 
+// Headlines, not numbers: the answer must quote at least one of them (see runner.mjs).
+const NEWS_REFERENCE: Reference = {
+  code: `export default async function (input, { fetched = [] } = {}) {
+  // The same feed the skill read, so even a skill with a fixed topic is checked.
+  let url = fetched.find((u) => u.includes("news.google.com/rss"));
+  if (!url) {
+    const words = Object.values(input).filter((v) => typeof v === "string").join(" ").trim().split(/\\s+/).filter(Boolean);
+    if (!words.length) throw new Error("Cross-check failed: the skill never read the news feed, so its answer can't come from it. Fetch the feed and say its titles.");
+    url = "https://news.google.com/rss/search?q=" + words.map(encodeURIComponent).join("+") + "+when:7d&hl=en-IN&gl=IN&ceid=IN:en";
+  }
+  const xml = await (await fetch(url)).text();
+  return xml.split("<item>").slice(1, 30).map((it) => (it.split("<title>")[1] ?? "").split("</title>")[0]);
+}`,
+};
+
 export const CATALOG: Source[] = [
   {
     id: "weather",
@@ -204,6 +219,24 @@ export const CATALOG: Source[] = [
       },
     ],
     notes: "Search first to get the page key, then fetch the summary. Speak only the first one or two sentences of extract.",
+  },
+  {
+    id: "news",
+    reference: NEWS_REFERENCE,
+    name: "Google News",
+    useFor: "latest news headlines about any person, company, product, event or topic (what happened, what was launched or announced, recent news); the topic is the tool's input",
+    domains: ["news.google.com"],
+    endpoints: [
+      {
+        url: "https://news.google.com/rss/search?q={query}+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
+        returns: "RSS XML, newest stories first: <item><title>Headline - Publisher</title><link>…</link><pubDate>Fri, 17 Oct 2026 08:00:00 GMT</pubDate>…</item>",
+        example: "https://news.google.com/rss/search?q=elon+musk+car+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
+      },
+    ],
+    notes: `The response is XML (RSS), not JSON. Read it exactly like this (no regular expressions needed):
+const xml = await res.text();
+const titles = xml.split("<item>").slice(1, 4).map((it) => it.split("<title>")[1].split("</title>")[0].split("&amp;").join("and"));
+If titles is empty, say no recent news was found. Each title already ends with " - Publisher". query: the topic's keywords, each passed through encodeURIComponent, joined with "+". Speech: "Latest news on <topic>: " + titles.join("; ") + "."`,
   },
   {
     id: "hacker_news",

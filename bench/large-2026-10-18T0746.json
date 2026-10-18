@@ -1,0 +1,72 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 2,
+  "rows": [
+    {
+      "run": 1,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 143.901,
+      "attempts": 3,
+      "skill": "get_latest_launches",
+      "speech": "Elon Musk has recently launched,,."
+    },
+    {
+      "run": 1,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 82.836,
+      "attempts": 2,
+      "skill": "get_latest_news",
+      "speech": "The latest news about ISRO includes:."
+    },
+    {
+      "run": 1,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "refused",
+      "asExpected": false,
+      "seconds": 135.701,
+      "reason": "I tried a few times but couldn't get that working reliably. (last problem: Test failed: - speech is an apology, but the example input is valid: the request or the parsi)"
+    },
+    {
+      "run": 2,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 131.026,
+      "attempts": 2,
+      "skill": "get_recent_launches",
+      "speech": "Elon Musk has launched 2 new car models recently: i, a."
+    },
+    {
+      "run": 2,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 75.953,
+      "attempts": 2,
+      "skill": "get_latest_news",
+      "speech": "The latest news about ISRO includes: Unknown headline. Unknown headline. Unknown headline."
+    },
+    {
+      "run": 2,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 121.944,
+      "attempts": 4,
+      "skill": "get_cricket_news",
+      "speech": "Here are the top three cricket news headlines: No title, No title, No title."
+    }
+  ]
+}

@@ -73,6 +73,8 @@ Set natural=true unless there is a clear problem. If natural=false, describe the
 // so "sorry, not found" is a failure there). Kept in sync with speechProblems().
 const questionOf = (request: string) => request.toLowerCase().replace(/[?.!\s]+$/, "");
 // "Nothing found" or an error on a valid example means the URL or parsing is wrong.
+// Placeholders and empty list items: "Unknown headline", "No title", "launched,,."
+const PLACEHOLDER = "\\b(unknown|untitled|no title|n\\/a)\\b|,\\s*,|,\\s*\\.|:\\s*\\.";
 const NOTHING = "\\berror\\b|\\bfailed\\b|not found|\\bno\\b[^.]{0,40}\\bfound\\b|no (data|results|information)\\b|not available|please provide|\\binvalid\\b";
 
 export function speechAssert(request: string): string {
@@ -81,6 +83,7 @@ export function speechAssert(request: string): string {
     "!/undefined|NaN|\\[object Object\\]|\\bnull\\b/.test(result.speech)",
     "!/sorry|couldn.?t|could not|unable|not find|apolog/i.test(result.speech)",
     `!/${NOTHING}/i.test(result.speech)`,
+    `!/${PLACEHOLDER}/i.test(result.speech)`,
     "!/\\?\\s*$/.test(result.speech)",
     "!/\\d\\.\\d{3,}/.test(result.speech)",
     `!result.speech.toLowerCase().includes(${JSON.stringify(questionOf(request))})`,
@@ -98,6 +101,8 @@ function speechProblems(result: unknown, request: string): string[] {
     p.push("speech is an apology, but the example input is valid: the request or the parsing is wrong (check the URL and field names against the example response)");
   if (new RegExp(NOTHING, "i").test(r.speech))
     p.push("speech says nothing was found or an error happened, but the example input is valid: the request or the parsing is wrong (check the URL, the parameter format such as country codes, and field names against the example response)");
+  if (new RegExp(PLACEHOLDER, "i").test(r.speech))
+    p.push("speech has placeholders or empty items (Unknown, No title, ',,'): the fields are read wrongly; take them from the exact structure of the example response");
   if (/\?\s*$/.test(r.speech)) p.push("speech must end with an answer, not a question");
   if (/\d\.\d{3,}/.test(r.speech)) p.push("round the numbers in speech (Math.round, or toFixed(1) for small values)");
   if (r.speech.toLowerCase().includes(questionOf(request))) p.push("speech repeats the user's question; say only the answer");
@@ -119,7 +124,11 @@ function compact(body: string, max = 1400): string {
   let out = body;
   try {
     out = JSON.stringify(JSON.parse(body));
-  } catch {}
+  } catch {
+    // RSS: the stories, not the channel header, are what the code has to read.
+    const first = body.indexOf("<item>");
+    if (first > 0) out = body.slice(first);
+  }
   return out.length > max ? out.slice(0, max) + " …(truncated)" : out;
 }
 
@@ -189,6 +198,17 @@ function describeFailure(report: TestReport, request: string): string {
     .join("\n");
 }
 
+/** What the live test asked and answered, and what the cross-check compared, for the build log. */
+function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent: (e: ForgeEvent) => void) {
+  const r = report.results[0];
+  const speech = (r?.result as { speech?: string } | undefined)?.speech;
+  if (speech) onEvent({ stage: "test", message: `Test ${JSON.stringify(spec.tests[0].input)} answered: "${speech.slice(0, 160)}"` });
+  const c = r?.crossCheck;
+  if (typeof c?.said === "string") onEvent({ stage: "test", message: `Cross-check: the answer quotes "${c.said}", a headline in the ${source} feed it read` });
+  else if (c?.source !== undefined) onEvent({ stage: "test", message: `Cross-check: the answer says ${c.said}, ${source} says ${c.source}${r.passed ? ", a match" : ""}` });
+  else if (c?.skipped) onEvent({ stage: "test", message: `Cross-check skipped: ${c.skipped}` });
+}
+
 export async function guidedForge(request: string, onEvent: (e: ForgeEvent) => void): Promise<SmithResult> {
   onEvent({ stage: "thinking", message: "Choosing a data source" });
   const plan = await ask<Plan>(
@@ -206,6 +226,9 @@ Otherwise design a reusable tool: a snake_case verb name (like get_air_quality),
   const src = catalogById.get(plan.source);
   if (!plan.feasible || !src) throw new ForgeFailed(plan.reason || "I can't find a public source for that yet.");
 
+  const inputs = plan.inputs.map((i) => `${toSnake(i.name)}: ${i.type}`).join(", ");
+  onEvent({ stage: "thinking", message: `Chose ${src.name}, a verified source for ${src.useFor}` });
+  onEvent({ stage: "thinking", message: `Designed ${toSnake(plan.name)}(${inputs})` });
   const docs = sourceDocs(src);
   const evidence = await samples(src, onEvent);
   const brief = `The user asked: "${request}"
@@ -247,6 +270,7 @@ ${evidence}`;
       onEvent({ stage: "test", message: "Running a live test in the sandbox" });
       const report = await testSpec(spec);
       const speech = (report.results[0]?.result as { speech?: string } | undefined)?.speech ?? "";
+      tellResult(spec, report, src.name, onEvent);
       const problem = report.passed && !reviewed && attempt < config.maxSubmissions ? await reviewSpeech(request, speech) : null;
       reviewed ||= report.passed;
       if (report.passed && !problem) {

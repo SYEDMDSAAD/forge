@@ -1,0 +1,74 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 2,
+  "rows": [
+    {
+      "run": 1,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 65.937,
+      "attempts": 2,
+      "skill": "get_recent_launches",
+      "speech": "Elon Musk has recently launched a new car model, which is not specified in the latest news."
+    },
+    {
+      "run": 1,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 31.483,
+      "attempts": 1,
+      "skill": "get_latest_news",
+      "speech": "Latest news on ISRO: Development of LOX-Methane engine in ISRO - ISRO; TRISHNA satellite is in advanced stage of realisation, says ISRO official - The Hindu; Strengthening India’s Space Sovereignty - Press Information Bureau."
+    },
+    {
+      "run": 1,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 31.27,
+      "attempts": 1,
+      "skill": "get_cricket_news",
+      "speech": "Latest news on India cricket team: India vs West Indies: Fifth T20 International – teams, start, lineups, Hope - Al Jazeera; India vs West Indies 5th T20 2026: Where to watch IND vs WI live streaming and telecast - Olympics; Asian Games: Indian Women’s Cricket Team Wins Country’s First Gold in Aichi: Akashvani News - News On AIR."
+    },
+    {
+      "run": 2,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 62.716,
+      "attempts": 2,
+      "skill": "get_recent_launches",
+      "speech": "Elon Musk has recently launched a new car model, which is not explicitly mentioned in the latest news articles. However, he has been working on various innovative projects related to electric vehicles and space exploration."
+    },
+    {
+      "run": 2,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 37.848,
+      "attempts": 1,
+      "skill": "get_latest_news",
+      "speech": "Latest news on ISRO: Development of LOX-Methane engine in ISRO - ISRO; TRISHNA satellite is in advanced stage of realisation, says ISRO official - The Hindu; Strengthening India’s Space Sovereignty - Press Information Bureau."
+    },
+    {
+      "run": 2,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 56.859,
+      "attempts": 2,
+      "skill": "get_cricket_news",
+      "speech": "Today's cricket updates for the India team include: India vs West Indies: Fifth T20 International – teams, start, lineups, Hope - Al Jazeera; India vs West Indies 5th T20 2026: Where to watch IND vs WI live streaming and telecast - Olympics; Asian Games: Indian Women’s Cricket Team Wins Country’s First Gold in Aichi: Akashvani News - News On AIR."
+    }
+  ]
+}
