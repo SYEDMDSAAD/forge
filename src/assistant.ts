@@ -4,7 +4,7 @@
 // It is not part of the MCP server: Forge never routes requests itself.
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
-import { CATALOG, genericInputs, isGeneric } from "./forge/catalog.js";
+import { CATALOG, genericInputs, isGeneric, knownInputs, namedIn } from "./forge/catalog.js";
 import { askOllama, createClient } from "./llm.js";
 
 // A source's one general skill answers far more than the question it was first
@@ -103,6 +103,13 @@ async function routeOllama(utterance: string, skills: RouteSkill[], only?: strin
   // "today's hot news" names no topic: leave it out, so the skill reads the top headlines.
   const generic = genericInputs.get(skill.name) ?? [];
   const input = Object.fromEntries(Object.entries(raw).filter(([k, v]) => v !== null && v !== "" && !(generic.includes(k) && typeof v === "string" && isGeneric(v))));
+  // A value from a known list the model left out ("When is NASA's next launch?"): take it from the request.
+  for (const { name, known } of knownInputs.get(skill.name) ?? []) {
+    if (props[name] && !input[name]) {
+      const hit = namedIn(utterance, known);
+      if (hit) input[name] = hit;
+    }
+  }
   // A knowledge skill finds the passages that answer the question by these words: always give it some.
   if (props.keywords && !input.keywords) {
     const { keywords } = await askOllama<{ keywords: string }>(

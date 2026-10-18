@@ -66,9 +66,10 @@ try {
   const oneOfTwo = await test(wiki('p.extract.split(". ").slice(0, 2).join(". ")'), { topic: "Quicksort", compare_with: "Bubble sort" }, "wikipedia");
   check(oneOfTwo?.passed === false && /doesn't quote/.test(oneOfTwo.error ?? ""), "a comparison that answers only one of its two topics is rejected");
 
-  // The Space Devs allows 15 requests an hour; when it refuses, these two can't run.
-  const nasa = await test(launches(true), { agency: "NASA" }, "launches");
-  if (nasa?.refused) console.log("SKIP launch checks: The Space Devs is rate-limiting this network (429); try again in an hour");
+  // The Space Devs allows 15 requests an hour; when it refuses (asked once, directly), these two can't run.
+  const status = await fetch("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&mode=list&search=NASA").then((r) => r.status, () => 0);
+  const nasa = status === 200 ? await test(launches(true), { agency: "NASA" }, "launches") : undefined;
+  if (status !== 200 || nasa?.refused) console.log(`SKIP launch checks: The Space Devs isn't answering this network right now (${status || "no reply"}); try again in an hour`);
   else {
     check(nasa?.passed === true, "a launch skill that searches for the agency asked about passes");
     const anyAgency = await test(launches(false), { agency: "NASA" }, "launches");

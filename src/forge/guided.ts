@@ -6,7 +6,7 @@
 import { config } from "../config.js";
 import { askOllama as ask } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
-import { CATALOG, catalogById, isGeneric, type Source, type SourceKind } from "./catalog.js";
+import { CATALOG, catalogById, isGeneric, namedIn, type Source, type SourceKind } from "./catalog.js";
 import { createHash } from "node:crypto";
 import { designedRecipes, loadRecipe, recipeKey, saveRecipe } from "./recipes.js";
 import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
@@ -191,7 +191,7 @@ Rules:
 - No try/catch around the whole function: an unexpected error must surface so it can be fixed (Forge reports a source that is down by itself).
 - The same code must work for any input: never write the example values (a city, a word, a code) into the code or the speech; always use the input variables.
 - speech is spoken aloud: a complete sentence that answers with the actual values (never repeat the question). Round numbers (format big ones with toLocaleString('en-IN')). No URLs, no markdown.
-- Write every string with backticks (template literals), never single quotes, so apostrophes like "don't" are safe.
+- Write strings with backticks (template literals) or double quotes, never single quotes, so apostrophes like "don't" are safe. Where the Notes join strings with +, copy that exactly: don't turn it into one template literal.
 - Use the exact field names shown in the example responses.`;
 
 function toSnake(s: string): string {
@@ -390,6 +390,12 @@ async function generalTool(request: string, plan: Plan, tool: NonNullable<Source
     for (const i of empty) if (again[i.name]?.trim()) values = { ...values, [i.name]: again[i.name] };
   }
   if (madeUp(values)) values = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, tool.inputs.find((i) => i.name === k)?.fromRequest && !said(v) ? "" : v]));
+  // A field with a known list of values the model left empty ("When is NASA's next launch?"): take it from the request.
+  for (const i of asked) {
+    if (values[i.name]?.trim() || !i.known) continue;
+    const hit = namedIn(request, i.known);
+    if (hit) values = { ...values, [i.name]: hit };
+  }
   // Still no topic ("I have a fever and a headache, what should I take?"): the guessed search words the user
   // actually said become the topics (fever, then headache).
   const spoken = (values.keywords ?? "").split(/[^A-Za-z0-9-]+/).filter((w) => w.length > 2 && new RegExp(`\\b${w.toLowerCase()}\\b`).test(words));
@@ -455,8 +461,9 @@ ${known(src.id)}Design a reusable tool: a snake_case verb name (like get_air_qua
   onEvent({ stage: "thinking", message: `Designed ${toSnake(plan.name)}(${inputs})` });
   // Code that passed for this kind of skill before: test it live on this request first.
   const key = recipeKey(src.id, Boolean(src.tool), toSnake(plan.name), plan.inputs.map((i) => toSnake(i.name)));
-  // Saved code only counts if it passed under the current rules: this source's notes and the checks.
-  const version = createHash("sha1").update(JSON.stringify([src, CONTRACT, NOTHING, PLACEHOLDER, speechAssert.toString(), buildSpec.toString()])).digest("hex").slice(0, 12);
+  // Saved code only counts if it passed under the current rules: this source's notes and the checks
+  // (not the code-writing prompt, which changes how code is written, not whether it is right).
+  const version = createHash("sha1").update(JSON.stringify([src, NOTHING, KNOWLEDGE_NOTHING, PLACEHOLDER, speechAssert.toString(), buildSpec.toString()])).digest("hex").slice(0, 12);
   const recipe = loadRecipe(key, version);
   if (recipe) {
     onEvent({ stage: "thinking", message: `Found code this laptop wrote and verified earlier (for "${recipe.request}"); testing it live on your question` });

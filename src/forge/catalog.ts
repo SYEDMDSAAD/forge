@@ -44,7 +44,8 @@ export interface Source {
     /** fromRequest: the value is words the user said (a topic, a city), never one of the description's examples. */
     /** generic: words like "today's hot news" mean no topic at all (the source's default, e.g. top headlines). */
     /** wholeRequest: the user's question itself, word for word (to find the passage that answers it). */
-    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; generic?: boolean; wholeRequest?: boolean; another: string[] }[];
+    /** known: values to take straight from the request when the model leaves the field empty (NASA, bitcoin). */
+    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; generic?: boolean; wholeRequest?: boolean; known?: string[]; another: string[] }[];
   };
 }
 
@@ -435,7 +436,13 @@ Speech: "The International Space Station is " + where + " right now, at an altit
       title: "Crypto Price",
       description: "The current price and 24-hour change of a cryptocurrency (bitcoin, ethereum, solana, dogecoin…), in US dollars or another currency.",
       inputs: [
-        { name: "coin", fromRequest: true, description: "the coin's full name in lowercase, e.g. bitcoin, ethereum, solana, dogecoin", another: ["ethereum", "solana"] },
+        {
+          name: "coin",
+          fromRequest: true,
+          description: "the coin's full name in lowercase, e.g. bitcoin, ethereum, solana, dogecoin",
+          known: ["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple", "litecoin", "polkadot", "tether", "binancecoin", "tron", "avalanche-2", "shiba-inu", "chainlink", "polygon"],
+          another: ["ethereum", "solana"],
+        },
         { name: "currency", description: "lowercase currency code to price it in, e.g. usd or inr; leave out for US dollars", optional: true, another: ["inr", "eur"] },
       ],
     },
@@ -450,8 +457,13 @@ Speech: "The International Space Station is " + where + " right now, at an altit
 const cur = (currency || "usd").toLowerCase();
 const json = await (await fetch("https://api.coingecko.com/api/v3/simple/price?ids=" + encodeURIComponent(coin.toLowerCase()) + "&vs_currencies=" + cur + "&include_24hr_change=true")).json();
 const p = json[coin.toLowerCase()];
-If p or p[cur] is missing, say that coin or currency was not found. const price = p[cur]; const change = p[cur + "_24h_change"];
-Speech: "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpperCase() + (change === undefined ? "." : ", " + change.toFixed(1) + " percent in the last 24 hours."). Never write a currency name like dollars in the code.`,
+If p or p[cur] is missing, say that coin or currency was not found.
+const price = p[cur];
+const change = p[cur + "_24h_change"];
+const tail = change === undefined ? "." : ", " + change.toFixed(1) + " percent in the last 24 hours.";
+const speech = "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpperCase() + tail;
+return { speech, data: { coin, currency: cur, price, change } };
+Never write a currency name like dollars in the code.`,
   },
   {
     id: "wikipedia",
@@ -630,7 +642,8 @@ Speech: word + " (" + m.partOfSpeech + ") means: " + m.definitions[0].definition
       name: "get_next_launch",
       title: "Next Rocket Launch",
       description: "When the next rocket launch is: any launch, or one by a named agency, company, rocket or mission (NASA, ISRO, SpaceX, Artemis).",
-      inputs: [{ name: "agency", fromRequest: true, description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true, another: ["ISRO", "Rocket Lab"] }],
+      inputs: [{ name: "agency", fromRequest: true, description: "the space agency, company, rocket or mission the user names (its name or abbreviation, as said), e.g. NASA or ISRO; empty only when the user asks about any launch",
+            known: ["NASA", "ISRO", "SpaceX", "ESA", "JAXA", "Roscosmos", "CNSA", "Blue Origin", "Rocket Lab", "ULA", "Arianespace", "Artemis", "Starship", "Falcon 9", "Falcon Heavy", "Gaganyaan", "Chandrayaan", "PSLV", "GSLV", "Soyuz", "New Glenn"], optional: true, another: ["ISRO", "Rocket Lab"] }],
     },
     endpoints: [
       {
@@ -639,9 +652,14 @@ Speech: word + " (" + m.partOfSpeech + ") means: " + m.definitions[0].definition
         example: "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&mode=list&search=NASA",
       },
     ],
-    notes: `Rate limited to 15 calls/hour. Build the URL like this, so the search is added only when an agency was given:
+    notes: `Rate limited to 15 calls/hour. Use exactly this shape, so the search is added only when an agency was given:
 const url = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=3&mode=list" + (agency ? "&search=" + encodeURIComponent(agency) : "");
-If results is empty, say no upcoming launch was found. Speech: the first result's name, who launches it (lsp_name), and the time in words, e.g. new Date(r.net).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) + " India time". data: { launch: r.name, provider: r.lsp_name, time: r.net, status: r.status.name, location: r.location }.`,
+const json = await (await fetch(url)).json();
+const r = (json.results || [])[0];
+If !r, say no upcoming launch was found.
+const when = new Date(r.net).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+const speech = "The next launch is " + r.name + " by " + r.lsp_name + " on " + when + " India time.";
+return { speech, data: { launch: r.name, provider: r.lsp_name, time: r.net, status: r.status.name, location: r.location } };`,
   },
   {
     id: "earthquakes",
@@ -881,6 +899,17 @@ export const catalogById = new Map(CATALOG.map((s) => [s.id, s]));
 // "today's hot news", "latest headlines": no topic, so the source's default (top stories).
 const GENERIC = new Set(["hot", "latest", "today", "todays", "top", "news", "headline", "headlines", "breaking", "current", "trending", "big", "main", "recent", "new", "happening", "stories", "story", "updates", "update", "the", "s", "what", "whats", "is", "are", "of", "in", "now", "right", "any", "some"]);
 export const isGeneric = (v: string) => v.toLowerCase().split(/[^a-z]+/).filter(Boolean).every((w) => GENERIC.has(w));
+
+/** Inputs of the sources' general skills with a known list of values, by skill name. */
+export const knownInputs = new Map(
+  CATALOG.flatMap((s) => (s.tool ? [[s.tool.name, s.tool.inputs.filter((i) => i.known).map((i) => ({ name: i.name, known: i.known! }))] as const] : [])),
+);
+
+/** The first known value the request names, as a whole word ("NASA's" names NASA). */
+export function namedIn(request: string, known: string[]): string | undefined {
+  const words = request.toLowerCase();
+  return known.find((k) => new RegExp(`\\b${k.toLowerCase().replace(/-/g, "[- ]?")}`, "i").test(words));
+}
 
 /** Inputs of the sources' general skills where generic words mean "leave it out", by skill name. */
 export const genericInputs = new Map(CATALOG.flatMap((s) => (s.tool ? [[s.tool.name, s.tool.inputs.filter((i) => i.generic).map((i) => i.name)] as const] : [])));

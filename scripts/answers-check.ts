@@ -2,6 +2,7 @@
 // rules (and general questions aren't mistaken for one), and an answer written
 // from a knowledge skill's passages is held to them.   npx tsx scripts/answers-check.ts
 import { emergency, supported, type Passage } from "../src/answers.js";
+import { knownInputs, namedIn } from "../src/forge/catalog.js";
 
 let failed = false;
 const check = (ok: boolean, what: string) => {
@@ -24,4 +25,9 @@ check(supported("The four pillars of object-oriented programming are encapsulati
 check(!supported("OOP was invented by Alan Kay in 1966 at Xerox.", passages, q), "a name the passages don't have (Alan Kay, Xerox) is not supported");
 check(!supported("An API is a connection between programs, first described in 1972.", passages, q), "a number the passages don't have (1972) is not supported");
 check(!supported("OOP languages typically compile bytecode quickly using garbage collectors and virtual machines with sophisticated optimizers.", passages, q), "an answer mostly made of outside words is not supported");
+// A field with a known list of values is filled from the request when the model leaves it empty.
+const agencies = knownInputs.get("get_next_launch")![0].known;
+check(namedIn("When is NASA's next launch?", agencies) === "NASA" && namedIn("When does SpaceX launch next?", agencies) === "SpaceX", "an agency the user names is taken from the request (NASA's, SpaceX)");
+check(namedIn("When is the next rocket launch?", agencies) === undefined, "no agency named, none taken");
+check(namedIn("How much is Ethereum worth?", knownInputs.get("get_crypto_price")![0].known) === "ethereum", "a coin the user names is taken from the request");
 process.exit(failed ? 1 : 0);
