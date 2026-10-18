@@ -131,7 +131,8 @@ export interface LastAnswer {
   speech: string;
   data?: unknown;
 }
-export type FollowUp = { speech: string; by: string; ms: number } | { speech: null; by: string; ms: number };
+/** `code`: code or pseudo code the user asked for, shown as a block and never read aloud. */
+export type FollowUp = { speech: string; code?: string; by: string; ms: number } | { speech: null; by: string; ms: number };
 
 const FOLLOW_SYSTEM =
   "You are a voice assistant. You just answered the user with live data. Decide whether their next question is a follow-up about that answer " +
@@ -148,19 +149,24 @@ export async function followUp(utterance: string, last: LastAnswer): Promise<Fol
   const context = `Your last answer (from the ${last.skill} skill${last.question ? `, to "${last.question}"` : ""}): "${last.speech}"${
     last.data ? `\nIts data: ${JSON.stringify(last.data).slice(0, 800)}` : ""
   }\n\nThe user now asks: "${utterance}"`;
-  const reply = (speech: string | null) => ({ speech, by: routerModel, ms: Math.round(performance.now() - t0) });
+  const reply = (speech: string | null, code?: string) => ({ speech, ...(speech && code?.trim() ? { code: code.trim() } : {}), by: routerModel, ms: Math.round(performance.now() - t0) });
+  const codeRule =
+    "If the user asks for code, pseudo code or a formula, write it laid out on separate lines with indentation, and make the spoken answer one short sentence introducing it: code is shown on screen, never read aloud.";
   const answerRules =
     "Answer in two or three short spoken sentences. Use the facts from your last answer where they help, and general knowledge for the rest. " +
     "Never state a current number, date, name or event that isn't in your last answer; if answering needs one, reply with exactly NEED_DATA. No markdown.";
   if (config.provider !== "ollama") {
     const res = await createClient().messages.create({
       model: routerModel,
-      max_tokens: 400,
-      system: `${FOLLOW_SYSTEM} If it needs new live data, reply with exactly the word NEED_DATA. Otherwise: ${answerRules}`,
+      max_tokens: 1200,
+      system: `${FOLLOW_SYSTEM} If it needs new live data, reply with exactly the word NEED_DATA. Otherwise: ${answerRules} ${codeRule} Put the code in one fenced code block.`,
       messages: [{ role: "user", content: context }],
     });
     const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-    return reply(!text || /NEED_DATA/.test(text) || !grounded(text, context) ? null : text);
+    const code = text.match(/```[a-z]*\n([^]*?)```/)?.[1];
+    const speech = text.replace(/```[^]*?```/g, "").trim();
+    // Numbers inside code (array indexes, loop bounds) are not facts about the world.
+    return reply(!speech || /NEED_DATA/.test(text) || !grounded(speech, context) ? null : speech, code);
   }
   const check = await askOllama<{ different_subject: boolean; needs_new_data: boolean }>(
     FOLLOW_SYSTEM,
@@ -170,12 +176,13 @@ export async function followUp(utterance: string, last: LastAnswer): Promise<Fol
     0,
   );
   if (check.different_subject) return reply(null);
-  const { speech } = await askOllama<{ speech: string }>(`You are a friendly voice assistant. ${answerRules}`, context, {
-    type: "object",
-    properties: { speech: { type: "string" } },
-    required: ["speech"],
-  });
-  return reply(grounded(speech.trim(), context) ? speech.trim() : null);
+  const { speech, code } = await askOllama<{ speech: string; code: string }>(
+    `You are a friendly voice assistant. ${answerRules} ${codeRule} Put it in code, with real line breaks; otherwise code is an empty string.`,
+    context,
+    { type: "object", properties: { speech: { type: "string" }, code: { type: "string" } }, required: ["speech", "code"] },
+  );
+  // Numbers inside code (array indexes, loop bounds) are not facts about the world.
+  return reply(grounded(speech.trim(), context) ? speech.trim() : null, code);
 }
 
 /**

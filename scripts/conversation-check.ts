@@ -42,6 +42,20 @@ for (const [last, utterance, answer] of CASES) {
   if (ok) passed++;
   console.log(`${ok ? "PASS" : "FAIL"} [${last.skill}] ${utterance} -> ${r.speech === null ? "needs live data: learn a skill" : `"${r.speech}"`} (${r.ms} ms)`);
 }
+// Code asked for comes back as a separate block (shown, not spoken), with real line breaks.
+const SORTS: LastAnswer = {
+  question: "What's the difference between merge sort and quicksort?",
+  skill: "explain_topic",
+  speech: "In computer science, merge sort is an efficient, general-purpose, comparison-based sorting algorithm. Quicksort is an efficient, general-purpose sorting algorithm.",
+};
+for (const utterance of ["Can you give the basic pseudo code for both sorts?", "Show me quicksort in Python"]) {
+  const r = await followUp(utterance, SORTS);
+  const code = r && r.speech !== null ? (r as { code?: string }).code : undefined;
+  const ok = !!code && code.split("\n").length >= 5 && r!.speech!.length < 300;
+  if (ok) passed++;
+  console.log(`${ok ? "PASS" : "FAIL"} [code] ${utterance} -> said "${r?.speech?.slice(0, 120)}", code: ${code ? `${code.split("\n").length} lines` : "none"}`);
+}
+
 // Short follow-ups are rewritten as full questions before routing: [previous, follow-up, words the rewrite must have]
 const REWRITES: [string, string, RegExp[]][] = [
   ["When is NASA's next launch?", "What about ISRO?", [/isro/i, /launch/i]],
@@ -55,6 +69,6 @@ for (const [previous, utterance, must] of REWRITES) {
   if (ok) passed++;
   console.log(`${ok ? "PASS" : "FAIL"} after "${previous}": "${utterance}" -> "${q}"`);
 }
-const total = CASES.length + REWRITES.length;
+const total = CASES.length + 2 + REWRITES.length;
 console.log(`\n${passed}/${total} follow-ups handled correctly`);
 process.exit(passed === total ? 0 : 1);

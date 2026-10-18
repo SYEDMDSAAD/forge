@@ -193,7 +193,7 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
  */
 async function followUp(utterance: string): Promise<boolean> {
   if (!last) return false;
-  const r: { speech: string | null; by?: string; ms?: number } = await fetch("/assistant/followup", {
+  const r: { speech: string | null; code?: string; by?: string; ms?: number } = await fetch("/assistant/followup", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ utterance, last }),
@@ -203,6 +203,18 @@ async function followUp(utterance: string): Promise<boolean> {
   if (!r.speech) return false;
   const card = el("div", "card answer follow");
   card.append(el("div", "card-kicker", "Follow-up"), el("div", "card-title", r.speech));
+  if (r.code) {
+    const pre = el("pre", "code answer-code");
+    pre.append(el("code", undefined, r.code));
+    const copy = el("button", "copy", "Copy");
+    copy.type = "button";
+    copy.onclick = () => {
+      void navigator.clipboard?.writeText(r.code!).then(() => (copy.textContent = "Copied"));
+    };
+    const wrap = el("div", "code-wrap");
+    wrap.append(pre, copy);
+    card.append(wrap);
+  }
   const cite = el("div", "cite");
   cite.append(el("span", "tag src", "From my last answer + general knowledge"), el("span", "tag warn", "Not live data · not cross-checked"));
   card.append(cite, el("div", "via", `${r.by} answered in ${took(r.ms ?? 0)}; it may only repeat numbers from the last answer, so anything current needs a skill`));
