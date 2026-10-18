@@ -2,6 +2,8 @@
 // reports pass/fail, attempts and time.
 //   npx tsx scripts/forge-bench.ts [filter]                 # the 12 core requests
 //   npx tsx scripts/forge-bench.ts --large --runs=3         # 30 new phrasings, 3 runs, saved to bench/
+// Measures learning from scratch, so code saved by earlier runs is not reused.
+process.env.FORGE_RECIPES ??= "0";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { ForgeFailed, forgeTool } from "../src/forge/smith.js";
 import { config } from "../src/config.js";

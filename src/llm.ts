@@ -39,6 +39,8 @@ export async function askOllama<T>(system: string, user: string, schema: object,
       stream: true,
       format: schema,
       options: { num_ctx: config.ollamaContext, temperature },
+      // Stay loaded between requests: reloading 5 GB on a laptop short of memory is slow.
+      keep_alive: config.ollamaKeepAlive,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

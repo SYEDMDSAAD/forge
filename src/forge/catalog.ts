@@ -33,7 +33,8 @@ export interface Source {
     title: string;
     description: string;
     /** `another`: second test values (the first that differs from the user's), to catch a value fixed in the code. */
-    inputs: { name: string; type?: "number"; description: string; optional?: boolean; another: string[] }[];
+    /** fromRequest: the value is words the user said (a topic, a city), never one of the description's examples. */
+    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; another: string[] }[];
   };
 }
 
@@ -146,18 +147,26 @@ const LAUNCH_REFERENCE: Reference = {
 // skill can't fetch the articles and then say something the model wrote itself.
 const WIKIPEDIA_REFERENCE: Reference = {
   code: `export default async function (input, { fetched = [] } = {}) {
-  let urls = fetched.filter((u) => u.includes("/page/summary/"));
-  if (!urls.length) {
-    const topics = Object.values(input).filter((v) => typeof v === "string" && v.trim());
-    if (!topics.length) throw new Error("Cross-check failed: the skill never read a Wikipedia summary, so its answer can't come from Wikipedia.");
-    for (const t of topics) {
-      const s = await (await fetch("https://en.wikipedia.org/w/rest.php/v1/search/title?limit=1&q=" + encodeURIComponent(t))).json();
-      if (s.pages?.[0]) urls.push("https://en.wikipedia.org/api/rest_v1/page/summary/" + s.pages[0].key);
-    }
+  const topics = Object.values(input).filter((v) => typeof v === "string" && v.trim());
+  let urls = [];
+  for (const t of topics) {
+    const s = await (await fetch("https://en.wikipedia.org/w/rest.php/v1/search/title?limit=1&q=" + encodeURIComponent(t))).json();
+    if (s.pages?.[0]) urls.push("https://en.wikipedia.org/api/rest_v1/page/summary/" + s.pages[0].key);
   }
-  const out = [];
-  for (const u of urls) out.push((await (await fetch(u)).json()).extract ?? "");
-  return out.filter((t) => t.length >= 12);
+  if (!urls.length) urls = fetched.filter((u) => u.includes("/page/summary/"));
+  if (!urls.length) throw new Error("Cross-check failed: the skill never read a Wikipedia summary, so its answer can't come from Wikipedia.");
+  const every = [];
+  for (const u of urls) every.push((await (await fetch(u)).json()).extract ?? "");
+  // Each topic asked about (both, in a comparison) must be answered from its own summary.
+  return { every: every.filter((t) => t.length >= 12) };
+}`,
+};
+
+// Earthquakes: the answer must name a place from the feed itself (not one the model made up).
+const EARTHQUAKE_REFERENCE: Reference = {
+  code: `export default async function () {
+  const feed = await (await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson")).json();
+  return feed.features.slice(0, 20).map((q) => q.properties.place).filter((p) => typeof p === "string" && p.length >= 12);
 }`,
 };
 
@@ -168,6 +177,15 @@ export const CATALOG: Source[] = [
     name: "Open-Meteo",
     useFor: "current weather, temperature, rain chance, wind, multi-day forecast, sunrise/sunset for a city",
     domains: ["geocoding-api.open-meteo.com", "api.open-meteo.com"],
+    tool: {
+      name: "get_weather",
+      title: "Weather",
+      description: "The weather in a city: right now (temperature, sky, humidity, wind) with today's high, rain chance, sunrise and sunset; or the forecast for tomorrow or the day after.",
+      inputs: [
+        { name: "city", fromRequest: true, description: "the city, e.g. Pune", another: ["Mumbai", "London"] },
+        { name: "day", description: "today, tomorrow or day after tomorrow, only when the user asks about a later day; leave out for right now", optional: true, another: ["tomorrow", "today"] },
+      ],
+    },
     endpoints: [
       {
         url: "https://geocoding-api.open-meteo.com/v1/search?count=1&name={city}",
@@ -180,7 +198,18 @@ export const CATALOG: Source[] = [
         example: "https://api.open-meteo.com/v1/forecast?latitude=18.52&longitude=73.86&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=3",
       },
     ],
-    notes: "First geocode the city name, then call forecast with its latitude/longitude. weather_code: 0 clear, 1-3 partly cloudy, 45-48 fog, 51-57 drizzle, 61-67 rain, 71-77 snow, 80-82 showers, 95-99 thunderstorm.",
+    notes: `Read it like this:
+const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(city))).json();
+If !g.results, say that city wasn't found. const place = g.results[0];
+const w = await (await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + place.latitude + "&longitude=" + place.longitude + "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=3")).json();
+const sky = (c) => (c === 0 ? "clear" : c <= 3 ? "partly cloudy" : c <= 48 ? "foggy" : c <= 67 ? "rainy" : c <= 77 ? "snowy" : c <= 82 ? "showery" : "stormy");
+const at = (iso) => iso.slice(11, 16);
+const d = w.daily;
+const i = /after/i.test(day || "") ? 2 : /tomorrow/i.test(day || "") ? 1 : 0;
+const speech = i === 0
+  ? "In " + place.name + " it's " + Math.round(w.current.temperature_2m) + "°C and " + sky(w.current.weather_code) + " right now, with humidity at " + w.current.relative_humidity_2m + "% and wind at " + Math.round(w.current.wind_speed_10m) + " km/h. Today: a high of " + Math.round(d.temperature_2m_max[0]) + "°C, a " + d.precipitation_probability_max[0] + "% chance of rain, sunrise at " + at(d.sunrise[0]) + " and sunset at " + at(d.sunset[0]) + "."
+  : (i === 1 ? "Tomorrow" : "The day after tomorrow") + " in " + place.name + ": a high of " + Math.round(d.temperature_2m_max[i]) + "°C and a low of " + Math.round(d.temperature_2m_min[i]) + "°C, with a " + d.precipitation_probability_max[i] + "% chance of rain. Sunrise at " + at(d.sunrise[i]) + ", sunset at " + at(d.sunset[i]) + ".";
+return { speech, data: { temperature: Math.round(w.current.temperature_2m), humidity: w.current.relative_humidity_2m, wind_speed: Math.round(w.current.wind_speed_10m), rain_chance: d.precipitation_probability_max[i] } };`
   },
   {
     id: "air_quality",
@@ -188,6 +217,12 @@ export const CATALOG: Source[] = [
     name: "Open-Meteo",
     useFor: "air quality index (AQI), pollution, PM2.5, PM10 for a city",
     domains: ["geocoding-api.open-meteo.com", "air-quality-api.open-meteo.com"],
+    tool: {
+      name: "get_air_quality",
+      title: "Air Quality",
+      description: "The current air quality (US AQI, PM2.5, PM10) and what it means for health, for any city.",
+      inputs: [{ name: "city", fromRequest: true, description: "the city, e.g. Delhi", another: ["Mumbai", "London"] }],
+    },
     endpoints: [
       {
         url: "https://geocoding-api.open-meteo.com/v1/search?count=1&name={city}",
@@ -200,7 +235,13 @@ export const CATALOG: Source[] = [
         example: "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi,pm2_5,pm10",
       },
     ],
-    notes: "US AQI bands: 0-50 good, 51-100 moderate, 101-150 unhealthy for sensitive groups, 151-200 unhealthy, 201-300 very unhealthy, 301+ hazardous. Phrase it like `The air quality in Delhi is unhealthy, with an AQI of 165.`",
+    notes: `Read it like this:
+const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(city))).json();
+If !g.results, say that city wasn't found. const place = g.results[0];
+const a = await (await fetch("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + place.latitude + "&longitude=" + place.longitude + "&current=us_aqi,pm2_5,pm10")).json();
+const aqi = Math.round(a.current.us_aqi);
+US AQI bands: 0-50 good, 51-100 moderate, 101-150 unhealthy for sensitive groups, 151-200 unhealthy, 201-300 very unhealthy, 301+ hazardous.
+Speech: "The air quality in " + place.name + " is " + band + ", with an AQI of " + aqi + ". PM2.5 is " + Math.round(a.current.pm2_5) + " micrograms per cubic metre." data: { us_aqi: aqi, pm2_5: a.current.pm2_5, pm10: a.current.pm10 }.`,
   },
   {
     id: "iss",
@@ -208,6 +249,7 @@ export const CATALOG: Source[] = [
     name: "Where the ISS at and OpenStreetMap",
     useFor: "where the International Space Station is right now, its speed and altitude, which country it is over",
     domains: ["api.wheretheiss.at", "nominatim.openstreetmap.org"],
+    tool: { name: "get_iss_location", title: "Where Is the ISS", description: "Where the International Space Station is right now: the country or ocean below it, its altitude and speed.", inputs: [] },
     endpoints: [
       {
         url: "https://api.wheretheiss.at/v1/satellites/25544",
@@ -220,7 +262,11 @@ export const CATALOG: Source[] = [
         example: "https://nominatim.openstreetmap.org/reverse?lat=18.5&lon=73.8&format=json&zoom=3&accept-language=en",
       },
     ],
-    notes: "No input needed. Over the ocean there is no country: say it's over the ocean.",
+    notes: `No input needed. Read it like this:
+const iss = await (await fetch("https://api.wheretheiss.at/v1/satellites/25544")).json();
+const geo = await (await fetch("https://nominatim.openstreetmap.org/reverse?lat=" + iss.latitude + "&lon=" + iss.longitude + "&format=json&zoom=3&accept-language=en")).json();
+const where = geo.address && geo.address.country ? "over " + geo.address.country : "over the ocean";
+Speech: "The International Space Station is " + where + " right now, at an altitude of " + Math.round(iss.altitude) + " kilometres, moving at " + Math.round(iss.velocity).toLocaleString("en-IN") + " kilometres per hour." data: { altitude: Math.round(iss.altitude), velocity: Math.round(iss.velocity), over: where }.`,
   },
   {
     id: "currency",
@@ -235,7 +281,7 @@ export const CATALOG: Source[] = [
       inputs: [
         { name: "amount", type: "number", description: "the amount of money to convert", another: [] },
         { name: "from_currency", description: "3-letter code of the currency converted from, e.g. USD", another: ["EUR", "GBP"] },
-        { name: "to_currency", description: "3-letter code of the currency converted to, e.g. INR", another: ["JPY", "AED"] },
+        { name: "to_currency", description: "3-letter code of the currency converted to, e.g. INR", another: ["JPY", "CHF"] },
       ],
     },
     endpoints: [
@@ -258,7 +304,7 @@ export const CATALOG: Source[] = [
       title: "Crypto Price",
       description: "The current price and 24-hour change of a cryptocurrency (bitcoin, ethereum, solana, dogecoin…), in US dollars or another currency.",
       inputs: [
-        { name: "coin", description: "the coin's full name in lowercase, e.g. bitcoin, ethereum, solana, dogecoin", another: ["ethereum", "solana"] },
+        { name: "coin", fromRequest: true, description: "the coin's full name in lowercase, e.g. bitcoin, ethereum, solana, dogecoin", another: ["ethereum", "solana"] },
         { name: "currency", description: "lowercase currency code to price it in, e.g. usd or inr; leave out for US dollars", optional: true, another: ["inr", "eur"] },
       ],
     },
@@ -269,7 +315,12 @@ export const CATALOG: Source[] = [
         example: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=inr&include_24hr_change=true",
       },
     ],
-    notes: 'coin ids are lowercase full names: bitcoin, ethereum, solana, dogecoin. currency is lowercase: inr, usd; use const cur = (currency || "usd").toLowerCase(). If json[coin] is missing, say that coin was not found. Speech: "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpperCase() + ", " + change + " percent in the last 24 hours." (never write a currency name like dollars in the code).',
+    notes: `Read it like this:
+const cur = (currency || "usd").toLowerCase();
+const json = await (await fetch("https://api.coingecko.com/api/v3/simple/price?ids=" + encodeURIComponent(coin.toLowerCase()) + "&vs_currencies=" + cur + "&include_24hr_change=true")).json();
+const p = json[coin.toLowerCase()];
+If p or p[cur] is missing, say that coin or currency was not found. const price = p[cur]; const change = p[cur + "_24h_change"];
+Speech: "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpperCase() + (change === undefined ? "." : ", " + change.toFixed(1) + " percent in the last 24 hours."). Never write a currency name like dollars in the code.`,
   },
   {
     id: "wikipedia",
@@ -282,8 +333,8 @@ export const CATALOG: Source[] = [
       title: "Explain from Wikipedia",
       description: "Explains a person, place, event, idea or concept from its Wikipedia summary, or compares two of them (merge sort and quicksort, Delhi and Mumbai).",
       inputs: [
-        { name: "topic", description: "what to explain, as a Wikipedia article name, e.g. Quicksort or Ada Lovelace", another: ["Binary search", "Taj Mahal"] },
-        { name: "compare_with", description: "a second topic, only when the user asks to compare or for a difference; leave out otherwise", optional: true, another: ["Bubble sort", "Red Fort"] },
+        { name: "topic", fromRequest: true, description: "what to explain, as a Wikipedia article name, e.g. Quicksort or Ada Lovelace", another: ["Binary search", "Taj Mahal"] },
+        { name: "compare_with", fromRequest: true, description: "a second topic, only when the user asks to compare or for a difference; leave out otherwise", optional: true, another: ["Bubble sort", "Red Fort"] },
       ],
     },
     endpoints: [
@@ -298,9 +349,17 @@ export const CATALOG: Source[] = [
         example: "https://en.wikipedia.org/api/rest_v1/page/summary/Taj_Mahal",
       },
     ],
-    notes: `Search first to get the page key, then fetch the summary. Do this for topic, and for compare_with when it is given. The answer must be Wikipedia's own words, never your own:
+    notes: `Answer with Wikipedia's own words, never your own. Use this shape, which handles one topic or two:
 const first = (text) => text.split(". ").slice(0, 2).join(". ").replace(/\\.?$/, ".");
-Speech: first(extract) for topic, then first(extract) for compare_with if given, joined with a space. If a search finds no page, say that topic wasn't found on Wikipedia.`,
+async function summary(t) {
+  const s = await (await fetch("https://en.wikipedia.org/w/rest.php/v1/search/title?limit=1&q=" + encodeURIComponent(t))).json();
+  if (!s.pages || !s.pages.length) return t + " wasn't found on Wikipedia.";
+  const p = await (await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(s.pages[0].key))).json();
+  return first(p.extract);
+}
+const parts = [];
+for (const t of [topic, compare_with].filter(Boolean)) parts.push(await summary(t));
+Speech: parts.join(" "). data: { topic, compare_with }.`,
   },
   {
     id: "news",
@@ -312,7 +371,7 @@ Speech: first(extract) for topic, then first(extract) for compare_with if given,
       name: "get_news",
       title: "Latest News",
       description: "Latest news headlines on any topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.",
-      inputs: [{ name: "topic", description: "the news topic in a few keywords, e.g. rocket launch or India cricket", another: ["India cricket", "Mars rover"] }],
+      inputs: [{ name: "topic", fromRequest: true, description: "the news topic in a few keywords, e.g. rocket launch or India cricket", another: ["India cricket", "Mars rover"] }],
     },
     endpoints: [
       {
@@ -331,6 +390,7 @@ If titles is empty, say no recent news was found. Each title already ends with "
     name: "Hacker News",
     useFor: "top tech news stories, what's trending on Hacker News",
     domains: ["hacker-news.firebaseio.com"],
+    tool: { name: "get_top_tech_news", title: "Top Tech Stories", description: "The top stories on Hacker News right now: what's trending in tech.", inputs: [] },
     endpoints: [
       {
         url: "https://hacker-news.firebaseio.com/v0/topstories.json",
@@ -343,13 +403,22 @@ If titles is empty, say no recent news was found. Each title already ends with "
         example: "https://hacker-news.firebaseio.com/v0/item/8863.json",
       },
     ],
-    notes: "Fetch only the first 3 ids' items, in parallel with Promise.all.",
+    notes: `No input needed. Read it like this:
+const ids = (await (await fetch("https://hacker-news.firebaseio.com/v0/topstories.json")).json()).slice(0, 3);
+const items = await Promise.all(ids.map(async (id) => (await fetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json")).json()));
+Speech: "The top stories on Hacker News right now: " + items.map((it) => it.title).join("; ") + "." data: { titles: items.map((it) => it.title) }.`,
   },
   {
     id: "dictionary",
     name: "the Free Dictionary",
     useFor: "meaning or definition of an English word",
     domains: ["api.dictionaryapi.dev"],
+    tool: {
+      name: "define_word",
+      title: "Define a Word",
+      description: "The meaning of an English word, with its part of speech.",
+      inputs: [{ name: "word", fromRequest: true, description: "the English word, e.g. serendipity", another: ["ephemeral", "resilient"] }],
+    },
     endpoints: [
       {
         url: "https://api.dictionaryapi.dev/api/v2/entries/en/{word}",
@@ -357,6 +426,11 @@ If titles is empty, say no recent news was found. Each title already ends with "
         example: "https://api.dictionaryapi.dev/api/v2/entries/en/serendipity",
       },
     ],
+    notes: `Read it like this:
+const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word.toLowerCase()));
+If res.status === 404, say that word wasn't found in the dictionary.
+const m = (await res.json())[0].meanings[0];
+Speech: word + " (" + m.partOfSpeech + ") means: " + m.definitions[0].definition. data: { word, part_of_speech: m.partOfSpeech }.`,
   },
   {
     id: "launches",
@@ -368,7 +442,7 @@ If titles is empty, say no recent news was found. Each title already ends with "
       name: "get_next_launch",
       title: "Next Rocket Launch",
       description: "When the next rocket launch is: any launch, or one by a named agency, company, rocket or mission (NASA, ISRO, SpaceX, Artemis).",
-      inputs: [{ name: "agency", description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true, another: ["ISRO", "Rocket Lab"] }],
+      inputs: [{ name: "agency", fromRequest: true, description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true, another: ["ISRO", "Rocket Lab"] }],
     },
     endpoints: [
       {
@@ -383,9 +457,16 @@ If results is empty, say no upcoming launch was found. Speech: the first result'
   },
   {
     id: "earthquakes",
+    reference: EARTHQUAKE_REFERENCE,
     name: "the US Geological Survey",
     useFor: "recent earthquakes around the world",
     domains: ["earthquake.usgs.gov"],
+    tool: {
+      name: "get_recent_earthquakes",
+      title: "Recent Earthquakes",
+      description: "The biggest earthquakes worldwide in the last day (magnitude 4.5 and up), with where they struck. It can't filter by country or city.",
+      inputs: [],
+    },
     endpoints: [
       {
         url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson",
@@ -393,12 +474,22 @@ If results is empty, say no upcoming launch was found. Speech: the first result'
         example: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson",
       },
     ],
+    notes: `No input needed. Read it like this:
+const quakes = (await (await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson")).json()).features.slice(0, 3);
+If quakes is empty, say there were no earthquakes of magnitude 4.5 or more in the last day.
+Speech: "In the last day, the biggest recent earthquakes were: " + quakes.map((q) => "magnitude " + q.properties.mag.toFixed(1) + " " + q.properties.place).join("; ") + ". Never add a place that isn't in properties.place. data: { count: quakes.length }.`,
   },
   {
     id: "holidays",
     name: "Nager.Date",
     useFor: "upcoming public holidays in a country (not available for India)",
     domains: ["date.nager.at"],
+    tool: {
+      name: "get_public_holidays",
+      title: "Public Holidays",
+      description: "The next public holidays in a country (not India).",
+      inputs: [{ name: "country_code", description: "2-letter ISO country code, e.g. US, GB, DE, JP", another: ["GB", "DE"] }],
+    },
     endpoints: [
       {
         url: "https://date.nager.at/api/v3/NextPublicHolidays/{countryCode}",
@@ -406,7 +497,11 @@ If results is empty, say no upcoming launch was found. Speech: the first result'
         example: "https://date.nager.at/api/v3/NextPublicHolidays/US",
       },
     ],
-    notes: "countryCode is a 2-letter ISO code: US, GB, DE, FR, JP. Check res.status === 200 and the body is non-empty before res.json().",
+    notes: `countryCode is a 2-letter ISO code: US, GB, DE, FR, JP. Read it like this:
+const res = await fetch("https://date.nager.at/api/v3/NextPublicHolidays/" + encodeURIComponent(country_code.toUpperCase()));
+const text = res.status === 200 ? await res.text() : "";
+const days = text ? JSON.parse(text).slice(0, 2) : [];
+If days is empty, say public holidays for that country aren't available. Speech: "The next public holidays in " + country_code.toUpperCase() + " are " + days.map((d) => d.name + " on " + new Date(d.date).toLocaleDateString("en-IN", { day: "numeric", month: "long" })).join(" and ") + ".".`,
   },
 ];
 

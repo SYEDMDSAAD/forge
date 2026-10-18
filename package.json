@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "build:web": "esbuild web/app.ts --bundle --format=esm --platform=browser --minify --sourcemap --outfile=web/public/app.js",
     "prestart": "npm run build:web",
-    "predev": "npm run build:web"
+    "predev": "npm run build:web",
+    "warm-up": "tsx scripts/warm-up.ts"
   },
   "keywords": [],
   "author": "Syed Mohammad Saad",

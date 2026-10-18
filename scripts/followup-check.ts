@@ -3,6 +3,8 @@
 // answer must be right; others only sound related (tomorrow's rain to a
 // current-weather skill) and must learn a new skill instead of reusing it.
 // Needs Ollama (or another provider).   npx tsx scripts/followup-check.ts [filter]
+// Measures learning from scratch, so code saved by earlier runs is not reused.
+process.env.FORGE_RECIPES ??= "0";
 import { writeFileSync } from "node:fs";
 import { route, type RouteSkill } from "../src/assistant.js";
 import { forgeTool, ForgeFailed } from "../src/forge/smith.js";
@@ -14,9 +16,10 @@ const GROUPS: { learn: string; asks: Ask[] }[] = [
     learn: "What's the weather in Pune right now?",
     asks: [
       ["What's the temperature in Delhi?", "use", /delhi/i],
-      ["Will it rain in Mumbai tomorrow?", "new"],
+      // The weather skill covers right now, tomorrow and sunrise/sunset (one general skill per source).
+      ["Will it rain in Mumbai tomorrow?", "use", /tomorrow in mumbai[^]*chance of rain/i],
       ["What's the air quality in Pune?", "new"],
-      ["When is sunset in Pune today?", "new"],
+      ["When is sunset in Pune today?", "use", /pune[^]*sunset at \d/i],
     ],
   },
   {

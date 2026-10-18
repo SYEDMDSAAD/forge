@@ -21,6 +21,8 @@ export const config = {
   ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
   // Ollama defaults to a 4k context, too small for Forge's prompts.
   ollamaContext: Number(process.env.OLLAMA_CONTEXT ?? 8192),
+  /** How long Ollama keeps the model loaded after a request (Ollama's own default is 5 minutes). */
+  ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE ?? "30m",
   // "agent": open-ended tool-use loop (Claude). "guided": short JSON-schema steps
   // over the verified source catalog, for small local models.
   smith: (process.env.FORGE_SMITH ?? (provider === "ollama" ? "guided" : "agent")) as "agent" | "guided",
@@ -43,6 +45,10 @@ export const config = {
   toolTimeoutMs: Number(process.env.FORGE_TOOL_TIMEOUT_MS ?? 15000),
   // Reuse source replies while they are fresh (per the source's Cache-Control).
   cache: process.env.FORGE_CACHE !== "0",
+  /** Reuse code that passed before (src/forge/recipes.ts). Read on use, so a benchmark can turn it off. */
+  get recipes() {
+    return process.env.FORGE_RECIPES !== "0";
+  },
   /** Natural voice for the demo page (downloads a 330 MB model once). */
   voice: process.env.FORGE_VOICE !== "0",
   // When a source is down, answer from a reply up to this old, saying how old it is.

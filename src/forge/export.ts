@@ -95,7 +95,10 @@ const plain = (text) => String(text).replace(/&amp;/g, "&").replace(/&quot;/g, '
 export async function crossCheck(speech, test, fetched = []) {
   if (!test.reference) return null;
   const reference = (await import("data:text/javascript;base64," + Buffer.from(test.reference.code).toString("base64"))).default;
-  const values = await withTimeout(reference(test.input ?? {}, { fetched }), 15000, "Reference check");
+  const reply = await withTimeout(reference(test.input ?? {}, { fetched }), 15000, "Reference check");
+  if (Array.isArray(reply?.every))
+    return reply.every.every((t) => typeof t !== "string" || t.length < 12 || plain(speech).includes(plain(t).slice(0, 32))) ? null : "the answer doesn't quote the source for every input";
+  const values = reply;
   const texts = values.filter((v) => typeof v === "string" && v.length >= 12);
   if (texts.length) return texts.some((t) => plain(speech).includes(plain(t).slice(0, 32))) ? null : "the answer quotes none of the source's current headlines";
   const said = numbersIn(speech);

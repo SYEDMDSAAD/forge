@@ -35,6 +35,14 @@ try {
   check(honest.passed, "a skill that uses its input passes both tests");
   const fixed = await testSpec(buildSpec("What does serendipity mean?", plan, catalogById.get("dictionary")!, code('"Serendipity"')));
   check(!fixed.passed && fixed.results[0].passed && !fixed.results[1].passed, "a skill that always says serendipity passes the first test but fails the second");
+  // A field that's an object, said as "[object Object]" (tidied to "[object]"), is never a passing answer.
+  const objectCode = `export default async function run({ word }) {
+  const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
+  const d = (await res.json())[0].meanings[0].definitions[0];
+  return { speech: "The word " + word + " means " + d + "." };
+}`;
+  const obj = await testSpec(buildSpec("What does serendipity mean?", plan, catalogById.get("dictionary")!, objectCode));
+  check(!obj.passed, "a skill that says [object Object] for a definition fails");
 } finally {
   shutdownSandbox();
 }

@@ -112,7 +112,14 @@ const numbersIn = (text) =>
  */
 async function crossCheck(speech, test, fetched) {
   const reference = await loadTool(test.reference.code);
-  const values = await withTimeout(reference(test.input ?? {}, { fetched }), job.timeoutMs, "Reference check");
+  const reply = await withTimeout(reference(test.input ?? {}, { fetched }), job.timeoutMs, "Reference check");
+  // { every: [...] }: the answer must quote each of them (both topics of a comparison).
+  if (Array.isArray(reply?.every)) {
+    const missing = reply.every.filter((t) => typeof t === "string" && t.length >= 12 && !plain(speech).includes(plain(t).slice(0, 32)));
+    if (!missing.length) return { said: reply.every.map((t) => String(t).slice(0, 60)).join(" / "), source: "the summaries it read" };
+    return { error: `Cross-check failed: the answer doesn't quote the source for every input; it is missing "${missing[0].slice(0, 120)}". Answer each input from its own response.` };
+  }
+  const values = reply;
   // Text the source reports (headlines): the answer must quote at least one.
   const texts = values.filter((v) => typeof v === "string" && v.length >= 12);
   if (texts.length) {

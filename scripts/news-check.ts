@@ -62,7 +62,9 @@ try {
   const quotes = await test(wiki('p.extract.split(". ").slice(0, 2).join(". ")'), { topic: "Quicksort" }, "wikipedia");
   check(quotes?.passed === true, "a Wikipedia skill that says the summary it read passes");
   const ownWords = await test(wiki('"Quicksort is a fast divide-and-conquer sorting algorithm that picks a pivot and partitions the array around it."'), { topic: "Quicksort" }, "wikipedia");
-  check(ownWords?.passed === false && /quotes none/.test(ownWords.error ?? ""), "a Wikipedia skill that reads the summary but says its own words is rejected");
+  check(ownWords?.passed === false && /doesn't quote/.test(ownWords.error ?? ""), "a Wikipedia skill that reads the summary but says its own words is rejected");
+  const oneOfTwo = await test(wiki('p.extract.split(". ").slice(0, 2).join(". ")'), { topic: "Quicksort", compare_with: "Bubble sort" }, "wikipedia");
+  check(oneOfTwo?.passed === false && /doesn't quote/.test(oneOfTwo.error ?? ""), "a comparison that answers only one of its two topics is rejected");
 
   // The Space Devs allows 15 requests an hour; when it refuses, these two can't run.
   const nasa = await test(launches(true), { agency: "NASA" }, "launches");

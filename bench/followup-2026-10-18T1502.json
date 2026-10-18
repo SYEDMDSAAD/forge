@@ -1,0 +1,210 @@
+[
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "What's the temperature in Delhi?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_weather {\"city\":\"Delhi\"}: \"In Delhi it's 25°C and clear right now, with humidity at 72% and wind at 4 km/h. Today: a high of 30°C, a 0% chance of rain, sunrise at 06:2\""
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "Will it rain in Mumbai tomorrow?",
+    "expect": "new",
+    "ok": false,
+    "shown": "get_weather {\"city\":\"Mumbai\",\"day\":\"tomorrow\"}: \"Tomorrow in Mumbai: a high of 36°C and a low of 27°C, with a 39% chance of rain. Sunrise at 06:33, sunset at 18:13.\""
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "What's the air quality in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "When is sunset in Pune today?",
+    "expect": "new",
+    "ok": false,
+    "shown": "get_weather {\"city\":\"Pune\",\"day\":\"today\"}: \"In Pune it's 30°C and partly cloudy right now, with humidity at 40% and wind at 1 km/h. Today: a high of 34°C, a 7% chance of rain, sunrise \""
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "How much is 50 euros in Japanese yen?",
+    "expect": "use",
+    "ok": true,
+    "shown": "convert_currency {\"amount\":50,\"from_currency\":\"EUR\",\"to_currency\":\"JPY\"}: \"50 EUR is about 8,891 JPY.\""
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What's the price of bitcoin in rupees?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What was the dollar to rupee rate in 2020?",
+    "expect": "new",
+    "ok": true,
+    "shown": "convert_currency asks for amount"
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "Any news on Virat Kohli?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_news {\"topic\":\"Virat Kohli\"}: \"Latest news on Virat Kohli: Microsoft CEO Satya Nadella responds to Virat Kohli's first-ever LinkedIn post - The Times of India; Virat Kohli\""
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "What's trending on Hacker News?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "When is the next rocket launch?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "When is ISRO's next launch?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_next_launch {\"agency\":\"ISRO\"}: \"The next rocket launch is GSLV Mk II: IRNSS-1L (NVS-03) by Indian Space Research Organization on 31 Oct 2026, 5:30 am India time.\""
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "When did SpaceX last launch a rocket?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "Where is the ISS right now?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "How much is ethereum worth in rupees?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_crypto_price {\"coin\":\"ethereum\",\"currency\":\"inr\"}: \"One ethereum is 2,25,438 INR, -2.1 percent in the last 24 hours.\""
+  },
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "Convert 100 dollars to euros",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "define_word",
+    "utterance": "Define ephemeral",
+    "expect": "use",
+    "ok": true,
+    "shown": "define_word {\"word\":\"ephemeral\"}: \"Ephemeral (noun) means: Something which lasts for a short period of time.\""
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "define_word",
+    "utterance": "Who was Albert Einstein?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "define_word",
+    "utterance": "Translate hello to Hindi",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the air quality in Delhi?",
+    "skill": "get_air_quality",
+    "utterance": "Is the air clean in Bengaluru?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_air_quality {\"city\":\"Bengaluru\"}: \"The air quality in Bengaluru is moderate, with an AQI of 59. PM2.5 is 39 micrograms per cubic metre.\""
+  },
+  {
+    "learn": "What's the air quality in Delhi?",
+    "skill": "get_air_quality",
+    "utterance": "What's the weather in Delhi?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between bubble sort and quicksort?",
+    "expect": "use",
+    "ok": true,
+    "shown": "explain_topic {\"topic\":\"bubble sort\",\"compare_with\":\"quicksort\"}: \"Bubble sort, sometimes referred to as sinking sort, is a simple sorting algorithm that repeatedly steps through the input list element by el\""
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the difference between binary search and quicksort?",
+    "expect": "use",
+    "ok": true,
+    "shown": "explain_topic {\"topic\":\"binary search\",\"compare_with\":\"quicksort\"}: \"In computer science, binary search, also known as half-interval search, logarithmic search, or binary chop, is a search algorithm that finds\""
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "Who was Ada Lovelace?",
+    "expect": "use",
+    "ok": true,
+    "shown": "explain_topic {\"topic\":\"Ada Lovelace\"}: \"Augusta Ada King, Countess of Lovelace, also known as Ada Lovelace, was an English mathematician and writer chiefly known for work on Charle\""
+  },
+  {
+    "learn": "Can you tell me the difference between merge sort and quicksort?",
+    "skill": "explain_topic",
+    "utterance": "What's the weather in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Where is the ISS right now?",
+    "skill": "get_iss_location",
+    "utterance": "How many people are in space right now?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Where is the ISS right now?",
+    "skill": "get_iss_location",
+    "utterance": "When will the ISS pass over Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

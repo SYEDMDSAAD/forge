@@ -7,6 +7,8 @@ import { config } from "../config.js";
 import { askOllama as ask } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
 import { CATALOG, catalogById, type Source } from "./catalog.js";
+import { createHash } from "node:crypto";
+import { designedRecipes, loadRecipe, recipeKey, saveRecipe } from "./recipes.js";
 import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
 import type { ForgeEvent, TestReport, ToolSpec } from "./types.js";
 import { fixApostrophes, syntaxError, validateSpec } from "./validate.js";
@@ -81,7 +83,7 @@ const NOTHING = "\\berror\\b|\\bfailed\\b|not found|\\bno\\b[^.]{0,40}\\bfound\\
 export function speechAssert(request: string): string {
   return [
     "typeof result.speech === 'string' && result.speech.length >= 15",
-    "!/undefined|NaN|\\[object Object\\]|\\bnull\\b/.test(result.speech)",
+    "!/undefined|NaN|\\[object\\b|\\bnull\\b/.test(result.speech)",
     "!/sorry|couldn.?t|could not|unable|not find|apolog/i.test(result.speech)",
     `!/${NOTHING}/i.test(result.speech)`,
     `!/${PLACEHOLDER}/i.test(result.speech)`,
@@ -97,7 +99,8 @@ function speechProblems(result: unknown, request: string): string[] {
   if (typeof r.speech !== "string") return ["run() must return an object with a speech string"];
   const p: string[] = [];
   if (r.speech.length < 15) p.push("speech is too short; say the actual answer in a full sentence");
-  if (/undefined|NaN|\[object Object\]|\bnull\b/.test(r.speech)) p.push("speech contains undefined/NaN/null/[object Object]: a field name is wrong; use the exact fields from the example response");
+  // "[object Object]" may reach here as "[object]": the tidy-up merges repeated words.
+  if (/undefined|NaN|\[object\b|\bnull\b/.test(r.speech)) p.push("speech contains undefined/NaN/null/[object Object]: a field name is wrong; use the exact fields from the example response");
   if (/sorry|couldn.?t|could not|unable|not find|apolog/i.test(r.speech))
     p.push("speech is an apology, but the example input is valid: the request or the parsing is wrong (check the URL and field names against the example response)");
   if (new RegExp(NOTHING, "i").test(r.speech))
@@ -156,7 +159,9 @@ export default async function run(input) {
 
 Rules:
 - No import or require. Only fetch and built-in JavaScript.
-- Never throw. When something isn't found, return a helpful speech sentence instead.
+- When something isn't found (a 404, an empty list), return a helpful speech sentence instead.
+- No try/catch around the whole function: an unexpected error must surface so it can be fixed (Forge reports a source that is down by itself).
+- The same code must work for any input: never write the example values (a city, a word, a code) into the code or the speech; always use the input variables.
 - speech is spoken aloud: a complete sentence that answers with the actual values (never repeat the question). Round numbers (format big ones with toLocaleString('en-IN')). No URLs, no markdown.
 - Write every string with backticks (template literals), never single quotes, so apostrophes like "don't" are safe.
 - Use the exact field names shown in the example responses.`;
@@ -166,9 +171,15 @@ function toSnake(s: string): string {
   return /^[a-z][a-z0-9_]{2,}$/.test(out) ? out : `skill_${out || "custom"}`.slice(0, 48);
 }
 
-// A currency code fixed in the code is often said as its name ("dollars").
-const CURRENCY_NAMES: Record<string, string> = { usd: "dollar", inr: "rupee", eur: "euro", gbp: "pound", jpy: "yen", aed: "dirham" };
-const spoken = (v: string) => [v.toLowerCase(), ...(CURRENCY_NAMES[v.toLowerCase()] ? [CURRENCY_NAMES[v.toLowerCase()]] : [])];
+// A code fixed in the code is often said as its name ("dollars", "the US").
+const NAMES: Record<string, string[]> = {
+  usd: ["dollar"], inr: ["rupee"], eur: ["euro"], gbp: ["pound"], jpy: ["yen"], chf: ["franc"],
+  us: ["united states", "america"], gb: ["united kingdom", "britain"], de: ["germany"], fr: ["france"], jp: ["japan"], in: ["india"],
+};
+const spoken = (v: string) => [v.toLowerCase(), ...(NAMES[v.toLowerCase()] ?? [])];
+// Short values that are everyday words, so their presence proves nothing.
+const COMMON = new Set(["in", "a", "an", "it", "is", "on", "at", "to", "no"]);
+const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function buildSpec(request: string, plan: Plan, src: Source, code: string): ToolSpec {
   const properties: Record<string, unknown> = {};
@@ -189,12 +200,12 @@ export function buildSpec(request: string, plan: Plan, src: Source, code: string
     if (i.type === "string" && another && another.toLowerCase() !== String(input[toSnake(i.name)] ?? "").toLowerCase()) other[toSnake(i.name)] = another;
   }
   const others = Object.values(other).map((v) => String(v).toLowerCase());
-  const fixed = Object.entries(input).filter(([k, v]) => typeof v === "string" && v.trim().length >= 3 && other[k] !== v && !others.some((o) => o.includes(v.toLowerCase())));
+  const fixed = Object.entries(input).filter(([k, v]) => typeof v === "string" && v.trim().length >= 2 && other[k] !== v && !others.some((o) => o.includes(v.toLowerCase())));
   if (Object.keys(other).some((k) => other[k] !== input[k]))
     tests.push({
       name: "another input",
       input: other,
-      assert: [speechAssert(request), ...fixed.flatMap(([, v]) => spoken(String(v))).map((w) => `!result.speech.toLowerCase().includes(${JSON.stringify(w)})`)].join(" && "),
+      assert: [speechAssert(request), ...fixed.flatMap(([, v]) => spoken(String(v))).filter((w) => !COMMON.has(w)).map((w) => `!/\\b${escape(w)}${w.length <= 3 ? "\\b" : ""}/i.test(result.speech)`)].join(" && "),
       ...(src.reference ? { reference: src.reference } : {}),
     });
   const description = plan.description.length >= 20 ? plan.description : `${plan.description || plan.title}. Use for ${src.useFor}.`;
@@ -241,20 +252,47 @@ function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent:
   else if (c?.skipped) onEvent({ stage: "test", message: `Cross-check skipped: ${c.skipped}` });
 }
 
+// Currency and country names a small model gives instead of the code an input asks for.
+const CODES: Record<string, string> = {
+  rupee: "INR", rupees: "INR", dollar: "USD", dollars: "USD", "us dollar": "USD", "us dollars": "USD", euro: "EUR", euros: "EUR",
+  pound: "GBP", pounds: "GBP", yen: "JPY", "japanese yen": "JPY", franc: "CHF", francs: "CHF", dirham: "AED", dirhams: "AED",
+  "united states": "US", usa: "US", america: "US", "united kingdom": "GB", uk: "GB", britain: "GB", germany: "DE", france: "FR", japan: "JP",
+};
+function codeOf(value: string, description: string): string {
+  if (!/\bcode\b/i.test(description)) return value;
+  const code = CODES[value.toLowerCase()];
+  if (!code) return value;
+  return /lowercase/i.test(description) ? code.toLowerCase() : code;
+}
+
 /** Turns the plan into the source's one general skill, keeping the user's topic as the test example. */
 async function generalTool(request: string, plan: Plan, tool: NonNullable<Source["tool"]>) {
-  const values = await ask<Record<string, string>>(
-    "You extract the values a request names.",
-    `The user asked: "${request}"\n\nFor each field give the value from the request${tool.inputs.some((i) => i.optional) ? ", or an empty string when the user didn't name it" : ""}:\n${tool.inputs.map((i) => `- ${i.name}: ${i.description}`).join("\n")}`,
-    { type: "object", properties: Object.fromEntries(tool.inputs.map((i) => [i.name, { type: "string" }])), required: tool.inputs.map((i) => i.name) },
-    0,
-  );
+  // Without the examples ("e.g. India cricket"), which a small model tends to copy.
+  // Only for free text: a code's examples ("e.g. usd or inr") show the format it needs.
+  const field = (i: (typeof tool.inputs)[number]) => `- ${i.name}: ${i.fromRequest ? i.description.replace(/,?\s*e\.g\.[^;]*/, "") : i.description}`;
+  const extract = (strict: boolean) =>
+    ask<Record<string, string>>(
+      "You extract the values a request names.",
+      `The user asked: "${request}"\n\nFor each field give the value from the request${tool.inputs.some((i) => i.optional) ? ", or an empty string when the user didn't name it" : ""}${
+        strict ? ". Copy the user's own words exactly" : ""
+      }:\n${tool.inputs.map(field).join("\n")}`,
+      { type: "object", properties: Object.fromEntries(tool.inputs.map((i) => [i.name, { type: "string" }])), required: tool.inputs.map((i) => i.name) },
+      0,
+    );
+  // A topic or city the user didn't say (no word of it is in the request) was made up.
+  const words = request.toLowerCase();
+  const madeUp = (v: Record<string, string>) =>
+    tool.inputs.some((i) => i.fromRequest && v[i.name]?.trim() && !v[i.name].toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 1 && words.includes(w)));
+  let values = !tool.inputs.length ? {} : await extract(false);
+  if (madeUp(values)) values = await extract(true);
+  if (madeUp(values))
+    values = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, tool.inputs.find((i) => i.name === k)?.fromRequest && !v.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 1 && words.includes(w)) ? "" : v]));
   Object.assign(plan, {
     name: tool.name,
     title: tool.title,
     description: tool.description,
     inputs: tool.inputs.map((i) => {
-      const said = values[i.name]?.trim() ?? "";
+      const said = codeOf(values[i.name]?.trim() ?? "", i.description);
       const example = i.type === "number" ? String(Number(said.replace(/[^0-9.]/g, "")) || 1) : said || (i.optional ? "" : request);
       const another = i.another.find((a) => a.toLowerCase() !== example.toLowerCase());
       return { name: i.name, type: i.type ?? "string", description: i.description, example, another_example: another, optional: i.optional };
@@ -262,30 +300,76 @@ async function generalTool(request: string, plan: Plan, tool: NonNullable<Source
   });
 }
 
+/** Skills written before for sources without a general tool: reusing one's exact name and inputs reuses its tested code. */
+function known(sourceId?: string): string {
+  const saved = designedRecipes().filter((r) => !sourceId || r.key.startsWith(`${sourceId}.`));
+  if (!saved.length) return "";
+  return `Tools already written and verified (source.name(inputs), and the request each was written for):\n${saved.map((r) => `- ${r.key}: "${r.request}"`).join("\n")}\nIf one of them answers exactly this kind of request (current weather is not tomorrow's forecast or sunset time), use its exact name and inputs.\n`;
+}
+
 export async function guidedForge(request: string, onEvent: (e: ForgeEvent) => void): Promise<SmithResult> {
   onEvent({ stage: "thinking", message: "Choosing a data source" });
-  const plan = await ask<Plan>(
+  // First only the source (a short reply): most sources have one general skill, so
+  // the model designs a tool only for the few that don't.
+  const pick = await ask<{ feasible: boolean; reason: string; source: string }>(
     SYSTEM,
     `The user asked the assistant: "${request}"
 
 Available public data sources:
 ${catalogMenu()}
 
-Pick the one source that can answer this. If none can (or it needs a login, payment, private data or a physical action), set feasible=false, source="none", and make reason one friendly sentence to the user explaining that you can't do it and why.
-Otherwise design a reusable tool: a snake_case verb name (like get_air_quality), a short title, a description saying exactly when to use it, and its inputs. Make inputs general (e.g. city), with the user's own values as examples, and for each a different realistic another_example (e.g. another city). Every value the user named that could change between questions (a city, a word, a coin, a currency) must be an input, never fixed in the code. Use no inputs if none are needed.`,
-    PLAN_SCHEMA,
+Pick the one source that can answer this. If none can (or it needs a login, payment, private data or a physical action), set feasible=false, source="none", and make reason one friendly sentence to the user explaining that you can't do it and why. Otherwise reason is empty.`,
+    { type: "object", properties: { feasible: PLAN_SCHEMA.properties.feasible, reason: PLAN_SCHEMA.properties.reason, source: PLAN_SCHEMA.properties.source }, required: ["feasible", "reason", "source"] },
   );
+  const src = catalogById.get(pick.source);
+  if (!pick.feasible || !src) throw new ForgeFailed(pick.reason || "I can't find a public source for that yet.");
+  const plan: Plan = src.tool
+    ? { ...pick, name: "", title: "", description: "", inputs: [] }
+    : await ask<Plan>(
+        SYSTEM,
+        `The user asked the assistant: "${request}"
 
-  const src = catalogById.get(plan.source);
-  if (!plan.feasible || !src) throw new ForgeFailed(plan.reason || "I can't find a public source for that yet.");
+It will be answered from ${src.name}: ${src.useFor}.
+${known(src.id)}Design a reusable tool: a snake_case verb name (like get_air_quality), a short title, a description saying exactly when to use it, and its inputs. Make inputs general (e.g. city), with the user's own values as examples, and for each a different realistic another_example (e.g. another city). Every value the user named that could change between questions (a city, a word, a coin, a currency) must be an input, never fixed in the code. Use no inputs if none are needed. Set feasible=true and source="${src.id}".`,
+        PLAN_SCHEMA,
+      );
+  plan.source = src.id;
   if (src.tool) await generalTool(request, plan, src.tool);
 
   const inputs = plan.inputs.map((i) => `${toSnake(i.name)}: ${i.type}`).join(", ");
   onEvent({ stage: "thinking", message: `Chose ${src.name}, a verified source for ${src.useFor}` });
   onEvent({ stage: "thinking", message: `Designed ${toSnake(plan.name)}(${inputs})` });
+  // Code that passed for this kind of skill before: test it live on this request first.
+  const key = recipeKey(src.id, Boolean(src.tool), toSnake(plan.name), plan.inputs.map((i) => toSnake(i.name)));
+  // Saved code only counts if it passed under the current rules: this source's notes and the checks.
+  const version = createHash("sha1").update(JSON.stringify([src, CONTRACT, NOTHING, PLACEHOLDER, speechAssert.toString(), buildSpec.toString()])).digest("hex").slice(0, 12);
+  const recipe = loadRecipe(key, version);
+  if (recipe) {
+    onEvent({ stage: "thinking", message: `Found code this laptop wrote and verified earlier (for "${recipe.request}"); testing it live on your question` });
+    const spec = buildSpec(request, plan, src, recipe.code);
+    if (!validateSpec(spec).length) {
+      onEvent({ stage: "test", message: "Running a live test in the sandbox" });
+      const report = await testSpec(spec);
+      tellResult(spec, report, src.name, onEvent);
+      if (report.passed) {
+        onEvent({ stage: "ready", message: `All tests passed for ${spec.name}, with no new code needed` });
+        return { spec, report, attempts: 1 };
+      }
+      const why = describeFailure(report, request, spec).split("\n").find((l) => l.trim() && !l.startsWith("Test with input"))?.replace(/^- /, "") ?? "";
+      onEvent({ stage: "repair", message: `The saved code didn't pass this time (${why.slice(0, 120)}); writing new code` });
+    }
+  }
+  const remember = (r: SmithResult) => {
+    saveRecipe(key, r.spec.code, request, version);
+    return r;
+  };
+
   const docs = sourceDocs(src);
   const evidence = await samples(src, onEvent);
-  const brief = `The user asked: "${request}"
+  const general = src.tool
+    ? `\nThis is a general skill for every question of its kind, and the user's question is only its first test: follow the code shape in the Notes exactly, with all its inputs and branches, and don't narrow it to this one question.`
+    : "";
+  const brief = `The user asked: "${request}"${general}
 Tool: ${plan.name}: ${plan.description}
 Inputs: ${plan.inputs.length ? plan.inputs.map((i) => `${toSnake(i.name)} (${i.type}) e.g. ${JSON.stringify(i.example)}`).join(", ") : "none"}
 
@@ -325,11 +409,12 @@ ${evidence}`;
       const report = await testSpec(spec);
       const speech = (report.results[0]?.result as { speech?: string } | undefined)?.speech ?? "";
       tellResult(spec, report, src.name, onEvent);
-      const problem = report.passed && !reviewed && attempt < config.maxSubmissions ? await reviewSpeech(request, speech) : null;
+      // A general skill's answer follows its source's shape (weather includes sunset), so it isn't reviewed against this one question.
+      const problem = report.passed && !reviewed && !src.tool && attempt < config.maxSubmissions ? await reviewSpeech(request, speech) : null;
       reviewed ||= report.passed;
       if (report.passed && !problem) {
         onEvent({ stage: "ready", message: `All tests passed for ${spec.name}` });
-        return { spec, report, attempts: attempt };
+        return remember({ spec, report, attempts: attempt });
       }
       if (problem) {
         onEvent({ stage: "repair", message: `Answer reads badly: ${problem.slice(0, 80)}` });
@@ -366,7 +451,7 @@ ${evidence}`;
   }
   if (working) {
     onEvent({ stage: "ready", message: `All tests passed for ${working.spec.name}` });
-    return working;
+    return remember(working);
   }
   throw new ForgeFailed("I tried a few times but couldn't get that working reliably.");
 }

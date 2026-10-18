@@ -168,6 +168,8 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   const fetched: string[] = [];
   let fetches = 0;
   let upstream: UpstreamFailure | undefined;
+  // Any request in this run that the source refused (429) or failed (5xx), even if a later one worked.
+  let refusal: UpstreamFailure | undefined;
   let staleMs: number | undefined;
   runner.onFetch = (req) => {
     const reply = (msg: object) => child.stdin.writable && child.stdin.write(JSON.stringify(msg) + "\n");
@@ -175,6 +177,7 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
     void relayFetch(req, job.allowedDomains, fetched, Number(job.fetchTimeoutMs ?? 10000), { allowStale: job.mode === "run" }).then((res) => {
       if (res.ok && res.staleMs !== undefined) staleMs = Math.max(staleMs ?? 0, res.staleMs);
       if (res.ok && res.status >= 400) upstream = { host: new URL(res.url).hostname, status: res.status, reason: reasonOf(res.body) };
+      if (res.ok && (res.status === 429 || res.status >= 500)) refusal = upstream;
       else if (!res.ok && res.code !== "ELIMIT") upstream = { host: new URL(req.url).hostname, status: 0, reason: res.error };
       else upstream = undefined; // only the most recent request can explain a crash
       reply(res);
@@ -200,6 +203,6 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   const result = JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput;
   // A source that refused (429) or failed (5xx) also explains an answer the skill
   // made from its error, like "no upcoming launch was found"; a 404 can be a real "not found".
-  const refused = upstream && (upstream.status === 429 || upstream.status >= 500);
-  return { ...result, fetched, ...((!result.ok || refused) && upstream ? { upstream } : {}), ...(staleMs !== undefined ? { staleMs } : {}) };
+  const reported = !result.ok ? (upstream ?? refusal) : refusal;
+  return { ...result, fetched, ...(reported ? { upstream: reported } : {}), ...(staleMs !== undefined ? { staleMs } : {}) };
 }

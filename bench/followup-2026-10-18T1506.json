@@ -1,0 +1,34 @@
+[
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "What's the temperature in Delhi?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_weather {\"city\":\"Delhi\"}: \"In Delhi it's 24°C and clear right now, with humidity at 72% and wind at 4 km/h. Today: a high of 30°C, a 0% chance of rain, sunrise at 06:2\""
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "Will it rain in Mumbai tomorrow?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_weather {\"city\":\"Mumbai\",\"day\":\"tomorrow\"}: \"Tomorrow in Mumbai: a high of 36°C and a low of 27°C, with a 39% chance of rain. Sunrise at 06:33, sunset at 18:13.\""
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "What's the air quality in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_weather",
+    "utterance": "When is sunset in Pune today?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_weather {\"city\":\"Pune\",\"day\":\"today\"}: \"In Pune it's 30°C and partly cloudy right now, with humidity at 42% and wind at 1 km/h. Today: a high of 34°C, a 7% chance of rain, sunrise \""
+  }
+]

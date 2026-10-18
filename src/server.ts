@@ -144,7 +144,13 @@ async function runSkill(cap: Capability, input: Record<string, unknown>): Promis
     const speech = `${sources.join(" and ")} isn't answering right now${why}. Try again in a minute.`;
     return { ...text(speech, { speech, unavailable: true, sources }), isError: true };
   }
-  if (!out.ok) return { ...text(`The ${cap.spec.title} skill failed: ${out.error}`), isError: true };
+  if (!out.ok) {
+    // The skill crashed on this input (its tests passed on others): say so plainly, keep the detail for the log.
+    const values = Object.values(input).filter((v) => typeof v === "string" || typeof v === "number");
+    const speech = `Sorry, I couldn't answer that with the ${cap.spec.title} skill${values.length ? ` for ${values.join(", ")}` : ""}. Try asking a different way.`;
+    console.error(`skill ${cap.spec.name} failed on ${JSON.stringify(input)}: ${out.error}`);
+    return { ...text(speech, { speech, error: String(out.error).slice(0, 300) }), isError: true };
+  }
   const result = out.result as { speech: string; data?: unknown };
   let cited = cite(cap, result.speech);
   if (out.staleMs !== undefined) cited += ` ${sources.join(" and ")} isn't responding, so that's from ${ago(out.staleMs)}.`;
