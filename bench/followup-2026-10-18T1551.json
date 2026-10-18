@@ -1,0 +1,26 @@
+[
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "Any news on Virat Kohli?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_news {\"topic\":\"Virat Kohli\"}: \"Latest news on Virat Kohli: Microsoft CEO Satya Nadella responds to Virat Kohli's first-ever LinkedIn post - The Times of India; Virat Kohli\""
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "What's trending on Hacker News?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "When is the next rocket launch?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

@@ -5,6 +5,7 @@
 // the folder and ships it like any hand-written integration.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { EXPLICIT } from "../sandbox/content-filter.js";
 import type { Capability } from "./types.js";
 
 const sdkVersion = (() => {
@@ -32,6 +33,11 @@ export const manifest = JSON.parse(readFileSync(new URL("./forge-export.json", i
 const realFetch = globalThis.fetch;
 const allowed = (host) => manifest.tool.allowedDomains.some((d) => host === d || host.endsWith("." + d));
 
+// Headlines are read aloud: explicit and spam stories are dropped from feeds, as in Forge.
+const UNSUITABLE = new RegExp(${JSON.stringify(EXPLICIT.source)}, "i");
+const filterFeed = (body) =>
+  body.replace(/<(item|entry)[\\s>][^]*?<\\/\\1>/g, (story) => (UNSUITABLE.test((/<title[^>]*>([^]*?)<\\/title>/.exec(story)?.[1] ?? "").replace(/&amp;/g, "&")) ? "" : story));
+
 /** URLs the skill requested since the last reset, for the cross-check. */
 export const requested = [];
 
@@ -44,7 +50,10 @@ globalThis.fetch = async function guardedFetch(input, init = {}) {
     if (!allowed(url.hostname)) throw new Error(url.hostname + " is not one of this skill's declared sites");
     const res = await realFetch(url, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(10000) });
     const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-    if (!location) return res;
+    if (!location) {
+      if (!/xml|rss|atom/i.test(res.headers.get("content-type") ?? "")) return res;
+      return new Response(filterFeed(await res.text()), { status: res.status, statusText: res.statusText, headers: res.headers });
+    }
     url = new URL(location, url);
   }
   throw new Error("Too many redirects");

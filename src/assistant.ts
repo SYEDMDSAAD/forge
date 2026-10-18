@@ -4,7 +4,7 @@
 // It is not part of the MCP server: Forge never routes requests itself.
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
-import { CATALOG } from "./forge/catalog.js";
+import { CATALOG, genericInputs, isGeneric } from "./forge/catalog.js";
 import { askOllama, createClient } from "./llm.js";
 
 // A source's one general skill answers far more than the question it was first
@@ -91,7 +91,9 @@ async function routeOllama(utterance: string, skills: RouteSkill[], only?: strin
     schema,
     0,
   );
-  const input = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null && v !== ""));
+  // "today's hot news" names no topic: leave it out, so the skill reads the top headlines.
+  const generic = genericInputs.get(skill.name) ?? [];
+  const input = Object.fromEntries(Object.entries(raw).filter(([k, v]) => v !== null && v !== "" && !(generic.includes(k) && typeof v === "string" && isGeneric(v))));
   return { skill: skill.name, input, missing: missingOf(skill, input) };
 }
 
@@ -109,7 +111,8 @@ async function routeClaude(utterance: string, skills: RouteSkill[], only?: strin
   const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
   const skill = use && skills.find((s) => s.name === use.name);
   if (!skill) return { skill: null };
-  const input = use.input as Record<string, unknown>;
+  const generic = genericInputs.get(skill.name) ?? [];
+  const input = Object.fromEntries(Object.entries(use.input as Record<string, unknown>).filter(([k, v]) => !(generic.includes(k) && typeof v === "string" && isGeneric(v))));
   return { skill: skill.name, input, missing: missingOf(skill, input) };
 }
 

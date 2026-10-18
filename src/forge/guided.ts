@@ -6,7 +6,7 @@
 import { config } from "../config.js";
 import { askOllama as ask } from "../llm.js";
 import { runInSandbox } from "../sandbox/sandbox.js";
-import { CATALOG, catalogById, type Source } from "./catalog.js";
+import { CATALOG, catalogById, isGeneric, type Source } from "./catalog.js";
 import { createHash } from "node:crypto";
 import { designedRecipes, loadRecipe, recipeKey, saveRecipe } from "./recipes.js";
 import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
@@ -196,12 +196,15 @@ export function buildSpec(request: string, plan: Plan, src: Source, code: string
   // ones (a word, a coin, a city) has them fixed in its code.
   const other: Record<string, unknown> = { ...input };
   for (const i of plan.inputs) {
+    const key = toSnake(i.name);
     const another = i.another_example?.trim();
-    if (i.type === "string" && another && another.toLowerCase() !== String(input[toSnake(i.name)] ?? "").toLowerCase()) other[toSnake(i.name)] = another;
+    // An optional value the user gave is left out of the second test, so the code's other branch (no value) is tested too.
+    if (i.optional && String(input[key] ?? "").trim()) delete other[key];
+    else if (i.type === "string" && another && another.toLowerCase() !== String(input[key] ?? "").toLowerCase()) other[key] = another;
   }
   const others = Object.values(other).map((v) => String(v).toLowerCase());
-  const fixed = Object.entries(input).filter(([k, v]) => typeof v === "string" && v.trim().length >= 2 && other[k] !== v && !others.some((o) => o.includes(v.toLowerCase())));
-  if (Object.keys(other).some((k) => other[k] !== input[k]))
+  const fixed = Object.entries(input).filter(([k, v]) => typeof v === "string" && v.trim().length >= 2 && k in other && other[k] !== v && !others.some((o) => o.includes(v.toLowerCase())));
+  if (JSON.stringify(other) !== JSON.stringify(input))
     tests.push({
       name: "another input",
       input: other,
@@ -292,7 +295,8 @@ async function generalTool(request: string, plan: Plan, tool: NonNullable<Source
     title: tool.title,
     description: tool.description,
     inputs: tool.inputs.map((i) => {
-      const said = codeOf(values[i.name]?.trim() ?? "", i.description);
+      const raw = codeOf(values[i.name]?.trim() ?? "", i.description);
+      const said = i.generic && isGeneric(raw) ? "" : raw;
       const example = i.type === "number" ? String(Number(said.replace(/[^0-9.]/g, "")) || 1) : said || (i.optional ? "" : request);
       const another = i.another.find((a) => a.toLowerCase() !== example.toLowerCase());
       return { name: i.name, type: i.type ?? "string", description: i.description, example, another_example: another, optional: i.optional };

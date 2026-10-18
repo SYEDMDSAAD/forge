@@ -7,6 +7,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { config } from "../config.js";
+import { filterContent } from "./content-filter.js";
 
 // Node gives each IPv6/IPv4 connect attempt 250ms by default; on high-latency
 // links (e.g. from India) that fails ~1 in 4 requests with ETIMEDOUT.
@@ -209,7 +210,10 @@ async function fetchUpstream(req: RelayRequest, allowed: string[], fetched: stri
         if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) [method, body] = ["GET", undefined];
         continue;
       }
-      return { id: req.id, ok: true, status: res.status, statusText: res.statusText, headers: res.headers, body: res.body.toString("base64"), url: url.href, redirected: hop > 0 };
+      // Feeds lose their explicit and spam stories here, before the skill or its cross-check reads them.
+      const contentType = res.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1];
+      const safe = filterContent(res.body, contentType);
+      return { id: req.id, ok: true, status: res.status, statusText: res.statusText, headers: res.headers, body: safe.toString("base64"), url: url.href, redirected: hop > 0 };
     }
     throw new RelayError("EREDIRECTS", "Too many redirects");
   } catch (e) {

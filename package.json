@@ -2,7 +2,7 @@
   "name": "forge-mcp",
   "version": "1.0.0",
   "scripts": {
-    "test": "tsx scripts/sandbox-security.ts && tsx scripts/e2e-tasks.ts && tsx scripts/e2e-hotplug.ts && tsx scripts/e2e-protocol-2025-03-26.ts && tsx scripts/cache-check.ts && tsx scripts/news-check.ts && tsx scripts/fixed-value-check.ts && tsx scripts/grounded-check.ts && tsx scripts/export-check.ts",
+    "test": "tsx scripts/sandbox-security.ts && tsx scripts/e2e-tasks.ts && tsx scripts/e2e-hotplug.ts && tsx scripts/e2e-protocol-2025-03-26.ts && tsx scripts/cache-check.ts && tsx scripts/news-check.ts && tsx scripts/fixed-value-check.ts && tsx scripts/grounded-check.ts && tsx scripts/content-filter-check.ts && tsx scripts/export-check.ts",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",

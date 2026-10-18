@@ -34,7 +34,8 @@ export interface Source {
     description: string;
     /** `another`: second test values (the first that differs from the user's), to catch a value fixed in the code. */
     /** fromRequest: the value is words the user said (a topic, a city), never one of the description's examples. */
-    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; another: string[] }[];
+    /** generic: words like "today's hot news" mean no topic at all (the source's default, e.g. top headlines). */
+    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; generic?: boolean; another: string[] }[];
   };
 }
 
@@ -365,25 +366,43 @@ Speech: parts.join(" "). data: { topic, compare_with }.`,
     id: "news",
     reference: NEWS_REFERENCE,
     name: "Google News",
-    useFor: "latest news headlines about any person, company, product, event or topic (what happened, what was launched or announced, recent news); the topic is the tool's input",
+    useFor: "today's top headlines, or the latest news about any person, company, product, event or topic (what happened, what was launched or announced)",
     domains: ["news.google.com"],
     tool: {
       name: "get_news",
       title: "Latest News",
-      description: "Latest news headlines on any topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.",
-      inputs: [{ name: "topic", fromRequest: true, description: "the news topic in a few keywords, e.g. rocket launch or India cricket", another: ["India cricket", "Mars rover"] }],
+      description: "Today's top headlines, or the latest news on a topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.",
+      inputs: [
+        {
+          name: "topic",
+          fromRequest: true,
+          generic: true,
+          optional: true,
+          description: "the news topic in a few keywords, e.g. rocket launch or India cricket; leave out for today's top headlines",
+          another: ["India cricket", "Mars rover"],
+        },
+      ],
     },
     endpoints: [
       {
+        url: "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+        returns: "RSS XML of today's top stories: <item><title>Headline - Publisher</title><link>…</link><pubDate>…</pubDate>…</item>",
+        example: "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+      },
+      {
         url: "https://news.google.com/rss/search?q={query}+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
-        returns: "RSS XML, newest stories first: <item><title>Headline - Publisher</title><link>…</link><pubDate>Fri, 17 Oct 2026 08:00:00 GMT</pubDate>…</item>",
+        returns: "the same RSS shape, newest stories on the topic first",
         example: "https://news.google.com/rss/search?q=elon+musk+car+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
       },
     ],
     notes: `The response is XML (RSS), not JSON. Read it exactly like this (no regular expressions needed):
-const xml = await res.text();
+const url = topic
+  ? "https://news.google.com/rss/search?q=" + topic.trim().split(/\\s+/).map(encodeURIComponent).join("+") + "+when:7d&hl=en-IN&gl=IN&ceid=IN:en"
+  : "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en";
+const xml = await (await fetch(url)).text();
 const titles = xml.split("<item>").slice(1, 4).map((it) => it.split("<title>")[1].split("</title>")[0].split("&amp;").join("and"));
-If titles is empty, say no recent news was found. Each title already ends with " - Publisher". query: the topic's keywords, each passed through encodeURIComponent, joined with "+". Speech: "Latest news on <topic>: " + titles.join("; ") + "."`,
+If titles is empty, say no suitable recent news was found. Each title already ends with " - Publisher".
+Speech: (topic ? "Latest news on " + topic : "Today's top headlines") + ": " + titles.join("; ") + "." data: { topic: topic || "top headlines", titles }.`,
   },
   {
     id: "hacker_news",
@@ -506,3 +525,10 @@ If days is empty, say public holidays for that country aren't available. Speech:
 ];
 
 export const catalogById = new Map(CATALOG.map((s) => [s.id, s]));
+
+// "today's hot news", "latest headlines": no topic, so the source's default (top stories).
+const GENERIC = new Set(["hot", "latest", "today", "todays", "top", "news", "headline", "headlines", "breaking", "current", "trending", "big", "main", "recent", "new", "happening", "stories", "story", "updates", "update", "the", "s", "what", "whats", "is", "are", "of", "in", "now", "right", "any", "some"]);
+export const isGeneric = (v: string) => v.toLowerCase().split(/[^a-z]+/).filter(Boolean).every((w) => GENERIC.has(w));
+
+/** Inputs of the sources' general skills where generic words mean "leave it out", by skill name. */
+export const genericInputs = new Map(CATALOG.flatMap((s) => (s.tool ? [[s.tool.name, s.tool.inputs.filter((i) => i.generic).map((i) => i.name)] as const] : [])));
