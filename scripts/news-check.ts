@@ -16,7 +16,8 @@ const feed = JSON.stringify("https://news.google.com/rss/search?q=india+when:7d&
 async function test(code: string, input: Record<string, unknown> = {}, source = "news") {
   const src = catalogById.get(source)!;
   const out = await runInSandbox({ mode: "test", code, allowedDomains: src.domains, tests: [{ name: "t", input, assert: "true", reference: src.reference! }] });
-  return (out as { results?: { passed: boolean; error?: string }[] }).results?.[0];
+  const result = (out as { results?: { passed: boolean; error?: string }[] }).results?.[0];
+  return result && { ...result, refused: out.upstream?.status === 429 };
 }
 
 try {
@@ -51,10 +52,14 @@ try {
   const r = (await (await fetch(url)).json()).results[0];
   return { speech: "The next launch is " + r.name + " by " + r.lsp_name + "." };
 }`;
+  // The Space Devs allows 15 requests an hour; when it refuses, these two can't run.
   const nasa = await test(launches(true), { agency: "NASA" }, "launches");
-  check(nasa?.passed === true, "a launch skill that searches for the agency asked about passes");
-  const anyAgency = await test(launches(false), { agency: "NASA" }, "launches");
-  check(anyAgency?.passed === false && /didn't search for it/.test(anyAgency.error ?? ""), "a launch skill asked about NASA that reads every agency's launches is rejected");
+  if (nasa?.refused) console.log("SKIP launch checks: The Space Devs is rate-limiting this network (429); try again in an hour");
+  else {
+    check(nasa?.passed === true, "a launch skill that searches for the agency asked about passes");
+    const anyAgency = await test(launches(false), { agency: "NASA" }, "launches");
+    check(anyAgency?.passed === false && /didn't search for it/.test(anyAgency.error ?? ""), "a launch skill asked about NASA that reads every agency's launches is rejected");
+  }
 } finally {
   shutdownSandbox();
 }

@@ -198,5 +198,8 @@ export async function runInSandbox(job: SandboxJob): Promise<SandboxOutput> {
   }
   // The host's record of what was fetched, not the runner's.
   const result = JSON.parse(out.stdout.slice(idx + MARKER.length).trim()) as SandboxOutput;
-  return { ...result, fetched, ...(!result.ok && upstream ? { upstream } : {}), ...(staleMs !== undefined ? { staleMs } : {}) };
+  // A source that refused (429) or failed (5xx) also explains an answer the skill
+  // made from its error, like "no upcoming launch was found"; a 404 can be a real "not found".
+  const refused = upstream && (upstream.status === 429 || upstream.status >= 500);
+  return { ...result, fetched, ...((!result.ok || refused) && upstream ? { upstream } : {}), ...(staleMs !== undefined ? { staleMs } : {}) };
 }

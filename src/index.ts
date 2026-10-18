@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { route } from "./assistant.js";
+import { followUp, route, standalone } from "./assistant.js";
 import { config } from "./config.js";
 import { warmSandbox } from "./sandbox/sandbox.js";
 import { createServer, markTaskCall, registry } from "./server.js";
@@ -59,10 +59,29 @@ app.post("/assistant/route", async (req: Request, res: Response) => {
     return;
   }
   try {
-    res.json((await route(utterance.slice(0, 500), skills.slice(0, 100), typeof only === "string" ? only : undefined)) ?? { fallback: true });
+    const previous = typeof req.body.previous === "string" ? req.body.previous.slice(0, 500) : undefined;
+    const asked = only ? utterance.slice(0, 500) : await standalone(utterance.slice(0, 500), previous);
+    const r = await route(asked, skills.slice(0, 100), typeof only === "string" ? only : undefined);
+    res.json(r ? { ...r, ...(asked !== utterance ? { rewritten: asked } : {}) } : { fallback: true });
   } catch (e) {
     console.error("route failed:", e);
     res.json({ fallback: true });
+  }
+});
+
+// A follow-up about the last answer that no skill fits: answered from that answer and general knowledge.
+app.post("/assistant/followup", async (req: Request, res: Response) => {
+  const { utterance, last } = req.body ?? {};
+  if (typeof utterance !== "string" || typeof last?.speech !== "string" || typeof last?.skill !== "string") {
+    res.status(400).json({ error: "utterance and last { skill, speech } are required" });
+    return;
+  }
+  try {
+    const q = typeof last.question === "string" ? last.question.slice(0, 500) : undefined;
+    res.json((await followUp(utterance.slice(0, 500), { question: q, skill: last.skill.slice(0, 100), speech: last.speech.slice(0, 2000), data: last.data })) ?? { speech: null });
+  } catch (e) {
+    console.error("follow-up failed:", e);
+    res.json({ speech: null });
   }
 });
 

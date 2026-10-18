@@ -1,6 +1,7 @@
 // The relay's response cache: fresh replies are reused, sources that say
 // "no-cache" are always asked again, and a source that is down is answered from
-// its last good reply only in real use (never while a skill is being tested).
+// its last good reply only in real use (never while a skill is being tested);
+// a source that refuses is reported even when the skill hides its error.
 //   npx tsx scripts/cache-check.ts
 import { seedCache } from "../src/sandbox/relay.js";
 import { runInSandbox, shutdownSandbox } from "../src/sandbox/sandbox.js";
@@ -55,6 +56,18 @@ try {
   seedCache(dead, JSON.stringify({ temperature: 21 }), 3 * 60 * 60_000);
   const tooOld = await get(dead, "forge-cache-test.invalid");
   check(!tooOld.speech.includes("cache=stale"), "replies older than 2 hours are never used");
+
+  // A skill that turns an error into an answer ("no launch was found"): a refusing or
+  // failing source is reported so the user hears "isn't answering", not a wrong answer.
+  const hides = (status: number) => `export default async function run() {
+  const r = await fetch("https://httpbin.org/status/${status}");
+  if (!r.ok) return { speech: "No upcoming launch was found." };
+  return { speech: "ok" };
+}`;
+  const down = await runInSandbox({ mode: "run", code: hides(503), input: {}, allowedDomains: ["httpbin.org"] });
+  check(down.ok && down.upstream?.status === 503, "a source that fails is reported even when the skill hides it in its answer");
+  const missing = await runInSandbox({ mode: "run", code: hides(404), input: {}, allowedDomains: ["httpbin.org"] });
+  check(missing.ok && missing.upstream === undefined, "a 404 is left to the skill: it can be a real \"not found\"");
 } finally {
   shutdownSandbox();
 }

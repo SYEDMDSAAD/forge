@@ -138,7 +138,7 @@ async function runSkill(cap: Capability, input: Record<string, unknown>): Promis
   const out = await runInSandbox({ mode: "run", code: cap.spec.code, input, allowedDomains: cap.spec.allowedDomains });
   registry.recordUse(cap.id);
   const sources = sourcesOf(cap);
-  if (!out.ok && out.upstream) {
+  if (out.upstream) {
     // The source is down or refusing, not the skill broken: say so in words a listener understands.
     const why = out.upstream.reason ? ` (${lowerFirst(out.upstream.reason.replace(/\.$/, ""))})` : out.upstream.status ? ` (error ${out.upstream.status})` : "";
     const speech = `${sources.join(" and ")} isn't answering right now${why}. Try again in a minute.`;

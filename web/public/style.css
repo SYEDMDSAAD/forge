@@ -88,6 +88,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border-radius: 999px; padding: 2px 9px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
 .tag.src { color: var(--text); }
 .tag.ok { color: var(--ok); border-color: rgba(61,220,151,.35); }
+.tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.card.follow { border-style: dashed; }
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
 .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
 .stat b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

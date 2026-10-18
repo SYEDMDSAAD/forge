@@ -149,7 +149,14 @@ function label(key: string): string {
 
 const took = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
+// The answer the user just heard, so a follow-up question can be about it.
+let last: { question?: string; skill: string; speech: string; data: unknown } | undefined;
+let lastQuestion = "";
+/** A short follow-up ("What about ISRO?") rewritten as a full question by the last route() call. */
+let understood: string | undefined;
+
 function answerCard(skill: Skill, speech: string, data: unknown, footer: string) {
+  last = { question: lastQuestion, skill: skill.name, speech, data };
   const card = el("div", "card answer");
   card.append(el("div", "card-kicker", skill.title));
   // The spoken answer ends with its citation; show that as a tag under the answer.
@@ -178,6 +185,30 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
   via.append(more);
   card.append(via);
   addCard(card);
+}
+
+/**
+ * A follow-up about the last answer that no skill fits ("could this launch be delayed?"),
+ * answered from that answer and general knowledge. Null when it needs live data.
+ */
+async function followUp(utterance: string): Promise<boolean> {
+  if (!last) return false;
+  const r: { speech: string | null; by?: string; ms?: number } = await fetch("/assistant/followup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ utterance, last }),
+  })
+    .then((res) => res.json())
+    .catch(() => ({ speech: null }));
+  if (!r.speech) return false;
+  const card = el("div", "card answer follow");
+  card.append(el("div", "card-kicker", "Follow-up"), el("div", "card-title", r.speech));
+  const cite = el("div", "cite");
+  cite.append(el("span", "tag src", "From my last answer + general knowledge"), el("span", "tag warn", "Not live data · not cross-checked"));
+  card.append(cite, el("div", "via", `${r.by} answered in ${took(r.ms ?? 0)}; it may only repeat numbers from the last answer, so anything current needs a skill`));
+  addCard(card);
+  speak(r.speech);
+  return true;
 }
 
 function say(text: string) {
@@ -454,14 +485,15 @@ interface Routed {
 
 /** Which skill answers `utterance`, with what inputs. With `only`, just fills that skill's inputs. */
 async function route(utterance: string, only?: Skill): Promise<Routed | undefined> {
-  type Reply = { fallback?: true; skill?: string | null; input?: Record<string, unknown>; missing?: string[]; by?: string; ms?: number };
+  type Reply = { fallback?: true; skill?: string | null; input?: Record<string, unknown>; missing?: string[]; by?: string; ms?: number; rewritten?: string };
   const r: Reply = await fetch("/assistant/route", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ utterance, skills: only ? [only] : skills, only: only?.name }),
+    body: JSON.stringify({ utterance, skills: only ? [only] : skills, only: only?.name, previous: lastQuestion || undefined }),
   })
     .then((res) => res.json())
     .catch(() => ({ fallback: true }));
+  understood = r.rewritten;
   if (r.fallback) {
     const skill = only ?? match(utterance);
     return skill && { skill, ...extractInput(utterance, skill) };
@@ -602,7 +634,7 @@ async function useSkill({ skill, input, missing, via }: Routed) {
 
 /** Builds a skill for `utterance`. `answered`: the user already heard the answer (from its live test). */
 async function learn(utterance: string): Promise<{ skill?: Skill; answered: boolean }> {
-  say("I can't do that yet. Give me a minute — I'll learn how.");
+  say("I don't have a skill for that yet. Let me see if I can learn one.");
   buildBegin(utterance);
   building = true;
   let result: CallToolResult | undefined;
@@ -659,10 +691,19 @@ async function ask(utterance: string) {
   const doneTyping = typing();
   try {
     const routed = await route(utterance);
-    if (routed) await useSkill(routed);
-    else if (building) say("I'm still learning the last thing you asked. Ask me this again in a minute.");
+    const asked = understood ?? utterance;
+    if (asked !== utterance) addMsg("note", `Understood as: “${asked}”`);
+    if (routed) {
+      lastQuestion = asked;
+      await useSkill(routed);
+    } else if (await followUp(utterance)) {
+      // answered from the last answer; nothing to learn
+    } else if (building) say("I'm still learning the last thing you asked. Ask me this again in a minute.");
     // Learning runs in the background, so the conversation can go on meanwhile.
-    else void learnThenAnswer(utterance);
+    else {
+      lastQuestion = asked;
+      void learnThenAnswer(asked);
+    }
   } catch (e) {
     say("Sorry, something went wrong.");
     addMsg("note", e instanceof Error ? e.message : String(e));
