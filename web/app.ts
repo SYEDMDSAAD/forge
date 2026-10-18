@@ -295,6 +295,11 @@ function learnCard(request: string) {
     step(stage: string, message: string) {
       detail.textContent = stage === "repair" ? `Fixing: ${message}` : /^writing the code/i.test(message) ? `${message}. The slowest step: usually under a minute.` : message;
       if (stage === "ready") stop();
+      // Code that passed before is reused: no writing, straight to the live test.
+      if (/^Found code/.test(message)) {
+        items[1].textContent = "Reuse verified code";
+        set(1);
+      } else if (/didn't pass this time/.test(message)) items[1].textContent = PHASES[1];
       if (stage === "submit" || stage === "repair" || (stage === "thinking" && /writing|fresh approach/i.test(message))) set(1);
       else if (stage === "test") set(2);
       else if (stage === "ready") set(3);
@@ -326,6 +331,8 @@ let buildStart = 0;
 function buildBegin(request: string) {
   buildStart = performance.now();
   $("build").hidden = false;
+  $("emptyLog").hidden = true;
+  $("app").classList.add("building");
   $("build-title").textContent = `Build log: “${request}”`;
   $("spinner").className = "spinner";
   $("steps").replaceChildren();
@@ -342,6 +349,7 @@ function buildStep(text: string, kind: "" | "ok" | "bad" | "wait" = "") {
 
 function buildEnd(ok: boolean, text: string) {
   building = false;
+  $("app").classList.remove("building");
   buildStep(text, ok ? "ok" : "bad");
   $("spinner").className = `spinner ${ok ? "done" : "fail"}`;
   current?.end(ok, text);
@@ -695,6 +703,8 @@ async function learnThenAnswer(utterance: string) {
 
 async function ask(utterance: string) {
   if (busy || !utterance.trim()) return;
+  $("app").classList.remove("left-open");
+  $("scrim").hidden = !$("app").classList.contains("right-open");
   busy = true;
   state.thinking = true;
   showState();
@@ -733,6 +743,48 @@ $("ask").addEventListener("submit", (e) => {
   input.value = "";
   void ask(text);
 });
+
+// ---------- panes ----------
+// Wide screens: the activity pane collapses (remembered). Narrow: both side panes are drawers.
+
+const app = $("app");
+const narrow = (px: number) => window.matchMedia(`(max-width: ${px}px)`).matches;
+const remember = (key: string, value?: string) => {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch {}
+  return null;
+};
+function syncPanes() {
+  const open = narrow(1180) ? app.classList.contains("right-open") : !app.classList.contains("right-closed");
+  $("rightToggle").setAttribute("aria-expanded", String(open));
+  $("scrim").hidden = !(app.classList.contains("right-open") || app.classList.contains("left-open"));
+}
+function toggleRight(show?: boolean) {
+  if (narrow(1180)) {
+    app.classList.remove("left-open");
+    app.classList.toggle("right-open", show);
+  } else {
+    app.classList.toggle("right-closed", show === undefined ? undefined : !show);
+    remember("forge.activity", app.classList.contains("right-closed") ? "closed" : "open");
+  }
+  syncPanes();
+}
+if (remember("forge.activity") === "closed") app.classList.add("right-closed");
+$("rightToggle").onclick = () => toggleRight();
+$("rightClose").onclick = () => toggleRight(false);
+$("leftToggle").onclick = () => {
+  app.classList.remove("right-open");
+  app.classList.toggle("left-open");
+  syncPanes();
+};
+$("scrim").onclick = () => {
+  app.classList.remove("left-open", "right-open");
+  syncPanes();
+};
+window.addEventListener("resize", syncPanes);
+syncPanes();
 
 // ---------- voice in ----------
 
