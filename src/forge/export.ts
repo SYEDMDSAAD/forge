@@ -48,7 +48,10 @@ globalThis.fetch = async function guardedFetch(input, init = {}) {
   for (let hop = 0; hop <= 5; hop++) {
     if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Blocked protocol " + url.protocol);
     if (!allowed(url.hostname)) throw new Error(url.hostname + " is not one of this skill's declared sites");
-    const res = await realFetch(url, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(10000) });
+    // Public APIs (Wikimedia among them) ask automated clients to say who they are.
+    const headers = new Headers(init.headers);
+    if (!headers.has("user-agent")) headers.set("user-agent", "Forge skill (https://github.com/SYEDMDSAAD/forge)");
+    const res = await realFetch(url, { ...init, headers, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(10000) });
     const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
     if (!location) {
       if (!/xml|rss|atom/i.test(res.headers.get("content-type") ?? "")) return res;
@@ -107,6 +110,10 @@ export async function crossCheck(speech, test, fetched = []) {
   const reply = await withTimeout(reference(test.input ?? {}, { fetched }), 15000, "Reference check");
   if (Array.isArray(reply?.every))
     return reply.every.every((t) => typeof t !== "string" || t.length < 12 || plain(speech).includes(plain(t).slice(0, 32))) ? null : "the answer doesn't quote the source for every input";
+  if (Array.isArray(reply?.anyOf)) {
+    const names = reply.anyOf.filter((t) => typeof t === "string" && plain(t));
+    return !names.length || names.some((t) => (" " + plain(speech) + " ").includes(" " + plain(t) + " ")) ? null : "the answer doesn't name what the source reports";
+  }
   const values = reply;
   const texts = values.filter((v) => typeof v === "string" && v.length >= 12);
   if (texts.length) return texts.some((t) => plain(speech).includes(plain(t).slice(0, 32))) ? null : "the answer quotes none of the source's current headlines";

@@ -190,7 +190,8 @@ async function fetchUpstream(req: RelayRequest, allowed: string[], fetched: stri
     for (const [k, v] of Object.entries(req.headers ?? {})) {
       if (!/^(host|connection|content-length|transfer-encoding|accept-encoding)$/i.test(k)) headers[k.toLowerCase()] = String(v);
     }
-    headers["user-agent"] ??= "Forge/1.0 (MCP skill sandbox)";
+    // Identifies Forge with a contact page, as Wikimedia and other public APIs ask of automated clients.
+    headers["user-agent"] ??= "Forge/1.0 (https://github.com/SYEDMDSAAD/forge; MCP skill sandbox)";
     headers["accept-encoding"] = "identity";
 
     for (let hop = 0; hop <= MAX_HOPS; hop++) {

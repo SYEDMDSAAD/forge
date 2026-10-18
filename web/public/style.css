@@ -311,3 +311,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   .facts dd { margin-bottom: 8px; }
   .sheet { padding: 18px 16px; }
 }
+
+/* ---------- kinds of answer ---------- */
+.tag.kind { color: var(--text); }
+.advice-note { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--warn); background: rgba(245,183,78,.07); border: 1px solid rgba(245,183,78,.25); }
+.passages { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+.passages summary { cursor: pointer; color: var(--accent); width: fit-content; }
+.passages ol { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
+.passages b { color: var(--text); font-weight: 600; margin-right: 4px; }
+.card.creative { border-style: dashed; box-shadow: none; }
+.card.cannot .card-kicker { color: var(--muted); }
+.chips.small { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 4px; }
+.chips.small button { padding: 7px 11px; font-size: 12.5px; }
+.card.emergency { border-color: rgba(242,112,111,.55); box-shadow: 0 0 0 4px rgba(242,112,111,.08), var(--shadow); }
+.card.emergency .card-kicker { color: var(--bad); }
+.card.emergency .actions { flex-wrap: wrap; margin-top: 12px; }
+.call { display: inline-flex; align-items: center; border-radius: 8px; padding: 8px 14px; font-weight: 600; font-size: 13.5px; text-decoration: none; background: var(--bad); color: #1a0606; }
+.call + .call { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); }
+.kinds { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13.5px; }
+.kinds b { color: var(--text); }
+.sources .kind { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px; }

@@ -119,6 +119,14 @@ async function crossCheck(speech, test, fetched) {
     if (!missing.length) return { said: reply.every.map((t) => String(t).slice(0, 60)).join(" / "), source: "the summaries it read" };
     return { error: `Cross-check failed: the answer doesn't quote the source for every input; it is missing "${missing[0].slice(0, 120)}". Answer each input from its own response.` };
   }
+  // { anyOf: [...] }: short names (Tokyo, a person): the answer must name one, as whole words.
+  if (Array.isArray(reply?.anyOf)) {
+    const names = reply.anyOf.filter((t) => typeof t === "string" && plain(t));
+    if (!names.length) return { skipped: "the source gave nothing to compare for this input" };
+    const hit = names.find((t) => ` ${plain(speech)} `.includes(` ${plain(t)} `));
+    if (hit) return { said: hit, source: hit };
+    return { error: `Cross-check failed: the answer doesn't name what the source reports, ${names.slice(0, 3).map((n) => `"${n}"`).join(" or ")}. Read the value from the response.` };
+  }
   const values = reply;
   // Text the source reports (headlines): the answer must quote at least one.
   const texts = values.filter((v) => typeof v === "string" && v.length >= 12);

@@ -26,7 +26,17 @@ interface Skill {
   sources?: string[];
   crossChecked?: boolean;
   request?: string;
+  /** What kind of answer it gives: shown as a label on every answer. */
+  kind?: "live" | "knowledge" | "fact" | "calculation";
 }
+
+interface Passage {
+  topic: string;
+  text: string;
+}
+type AdviceArea = "medical" | "legal" | "financial";
+/** The question being answered, and whether it asks for advice: used when a knowledge skill's passages become an answer. */
+let asking: { question: string; advice?: AdviceArea; kind?: string } = { question: "" };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const chat = $<HTMLOListElement>("chat");
@@ -51,12 +61,14 @@ function showState() {
 
 // ---------- rendering ----------
 
+// One of each kind: live data, knowledge, a fact, a calculation, today's news, creative writing.
 const SUGGESTIONS = [
   "What's the weather in Pune right now?",
-  "What's the air quality in Delhi?",
-  "Where is the ISS right now?",
-  "Convert 100 US dollars to rupees",
-  "When is the next rocket launch?",
+  "Explain how photosynthesis works",
+  "What's the capital of Australia?",
+  "What is 18% of 2500?",
+  "What's today's hot news?",
+  "Write a short poem about the monsoon",
 ];
 
 function renderChips() {
@@ -155,14 +167,30 @@ let lastQuestion = "";
 /** A short follow-up ("What about ISRO?") rewritten as a full question by the last route() call. */
 let understood: string | undefined;
 
-function answerCard(skill: Skill, speech: string, data: unknown, footer: string) {
+interface AnswerExtras {
+  /** A knowledge answer written from the passages and checked against them (false: the article's own words). */
+  composed?: boolean;
+  passages?: Passage[];
+  /** The advice note shown under an answer to a health, legal or money question. */
+  note?: string;
+}
+
+/** The label every answer carries: where it came from and how it was checked. */
+function kindTag(skill: Skill, extras: AnswerExtras): HTMLElement | undefined {
+  if (extras.passages?.length) return extras.composed ? el("span", "tag ok", "✓ Written from the article, checked against it") : el("span", "tag", "The article's own words");
+  const label = { live: "Live data", knowledge: "Reference", fact: "Exact fact", calculation: "Calculated" }[skill.kind ?? "live"];
+  return el("span", "tag kind", label);
+}
+
+function answerCard(skill: Skill, speech: string, data: unknown, footer: string, extras: AnswerExtras = {}) {
   last = { question: lastQuestion, skill: skill.name, speech, data };
   const card = el("div", "card answer");
   card.append(el("div", "card-kicker", skill.title));
   // The spoken answer ends with its citation; show that as a tag under the answer.
   const at = speech.lastIndexOf("Source:");
   card.append(el("div", "card-title", at > 0 ? speech.slice(0, at).trim() : speech));
-  if (data && typeof data === "object") {
+  // A knowledge answer's data is only its topics and passages, shown below instead.
+  if (data && typeof data === "object" && !extras.passages?.length) {
     const stats = el("div", "stats");
     for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
       if (v === null || typeof v === "object" || hiddenKey(k) || String(v).length > 40) continue;
@@ -174,10 +202,27 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
     }
     if (stats.childElementCount) card.append(stats);
   }
+  if (extras.note) card.append(el("p", "advice-note", extras.note));
   const cite = el("div", "cite");
+  const tag = kindTag(skill, extras);
+  if (tag) cite.append(tag);
   if (at > 0) cite.append(el("span", "tag src", speech.slice(at).trim().replace(/\.$/, "")));
-  if (skill.crossChecked) cite.append(el("span", "tag ok", "✓ cross-checked when learned"));
+  else if (extras.passages?.length) cite.append(el("span", "tag src", `Source: ${skill.sources?.join(" and ") ?? "Wikipedia"}`));
+  if (skill.crossChecked && !extras.passages?.length) cite.append(el("span", "tag ok", "✓ cross-checked when learned"));
+  if (extras.note) cite.append(el("span", "tag warn", "General information, not professional advice"));
   if (cite.childElementCount) card.append(cite);
+  if (extras.passages?.length) {
+    const details = el("details", "passages");
+    details.append(el("summary", undefined, `Read the ${extras.passages.length} passages it used`));
+    const list = el("ol");
+    for (const p of extras.passages) {
+      const li = el("li");
+      li.append(el("b", undefined, p.topic), document.createTextNode(` ${p.text}`));
+      list.append(li);
+    }
+    details.append(list);
+    card.append(details);
+  }
   const via = el("div", "via", footer);
   const more = el("button", "more", "How I got this");
   more.type = "button";
@@ -185,6 +230,32 @@ function answerCard(skill: Skill, speech: string, data: unknown, footer: string)
   via.append(more);
   card.append(via);
   addCard(card);
+}
+
+/**
+ * Shows a skill's answer. A knowledge skill returns the article's passages: the
+ * assistant writes a short answer to the exact question from them, checked
+ * against them, or falls back to the skill's own words (the article's summary).
+ * Returns what should be said aloud.
+ */
+async function presentAnswer(skill: Skill, speech: string, data: unknown, footer: string): Promise<string> {
+  const passages = (data as { passages?: Passage[] } | null)?.passages;
+  if (!Array.isArray(passages) || !passages.length) {
+    answerCard(skill, speech, data, footer);
+    return speech;
+  }
+  const r: { speech?: string; checked?: boolean; note?: string; by?: string; ms?: number } = await fetch("/assistant/compose", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question: asking.question || lastQuestion, passages, advice: asking.advice }),
+  })
+    .then((res) => res.json())
+    .catch(() => ({}));
+  const composed = Boolean(r.checked && r.speech);
+  const said = composed ? `${r.speech} Source: ${skill.sources?.join(" and ") ?? "Wikipedia"}.` : speech;
+  const how = composed ? ` · ${r.by} wrote it from ${passages.length} passages in ${took(r.ms ?? 0)}` : " · the written answer didn't pass the check, so these are the article's own words";
+  answerCard(skill, said, data, footer + how, { composed, passages, note: r.note });
+  return r.note ? `${said} ${r.note}` : said;
 }
 
 /**
@@ -372,7 +443,7 @@ interface FirstAnswer {
  */
 async function consentCard(cap: Skill | null, message: string, answer?: FirstAnswer, intro = "I've learned a new skill"): Promise<boolean> {
   const inputs = answer && Object.keys(answer.input).length ? ` with ${JSON.stringify(answer.input)}` : "";
-  if (answer && cap) answerCard(cap, answer.speech, answer.data, `Answered by the new skill's live test${inputs}, before you decide to keep it`);
+  const heard = answer && cap ? await presentAnswer(cap, answer.speech, answer.data, `Answered by the new skill's live test${inputs}, before you decide to keep it`) : answer?.speech;
   const node = ($<HTMLTemplateElement>("consent-tpl").content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLElement;
   if (answer) {
     node.querySelector(".card-kicker")!.lastChild!.textContent = " Keep this skill for next time?";
@@ -382,6 +453,7 @@ async function consentCard(cap: Skill | null, message: string, answer?: FirstAns
   node.querySelector(".card-body")!.textContent = cap?.description ?? message;
   const domains = node.querySelector(".domains")!;
   for (const d of cap?.allowedDomains ?? []) domains.append(el("code", undefined, d));
+  if (cap && !cap.allowedDomains.length) node.querySelector(".access")!.textContent = "Doesn't use the internet: it only calculates";
   if (cap) {
     const passed = cap.tests.filter((t) => t.passed).length;
     const tests = node.querySelector(".tests")!;
@@ -393,14 +465,17 @@ async function consentCard(cap: Skill | null, message: string, answer?: FirstAns
   const sites = (cap?.allowedDomains ?? []).join(" and ");
   speak(
     answer
-      ? `${answer.speech} I learned a new skill for this. Want me to keep it, so next time it's instant? It will only access ${sites}.`
+      ? `${heard} I learned a new skill for this. Want me to keep it, so next time it's instant? ${sites ? `It will only access ${sites}.` : "It doesn't use the internet."}`
       : `${intro}: ${cap?.title ?? "it"}. It will only access ${sites}. Should I install it?`,
   );
 
   const install = await new Promise<boolean>((resolve) => {
     node.querySelector<HTMLButtonElement>(".yes")!.onclick = () => resolve(true);
     node.querySelector<HTMLButtonElement>(".no")!.onclick = () => resolve(false);
+    // Or by voice: "yes, keep it" / "no thanks" (see ask()).
+    pendingConsent = resolve;
   });
+  pendingConsent = undefined;
   for (const b of node.querySelectorAll("button")) b.disabled = true;
   node.querySelector(install ? ".yes" : ".no")!.textContent = install ? (answer ? "Kept ✓" : "Installed ✓") : answer ? "Not kept" : "Declined";
   return install;
@@ -504,12 +579,12 @@ interface Routed {
 }
 
 /** Which skill answers `utterance`, with what inputs. With `only`, just fills that skill's inputs. */
-async function route(utterance: string, only?: Skill): Promise<Routed | undefined> {
+async function route(utterance: string, only?: Skill, kind?: string): Promise<Routed | undefined> {
   type Reply = { fallback?: true; skill?: string | null; input?: Record<string, unknown>; missing?: string[]; by?: string; ms?: number; rewritten?: string };
   const r: Reply = await fetch("/assistant/route", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ utterance, skills: only ? [only] : skills, only: only?.name, previous: lastQuestion || undefined }),
+    body: JSON.stringify({ utterance, skills: only ? [only] : skills, only: only?.name, previous: lastQuestion || undefined, kind }),
   })
     .then((res) => res.json())
     .catch(() => ({ fallback: true }));
@@ -542,10 +617,16 @@ async function openHow() {
   const list = $("sources");
   if (!list.childElementCount) {
     try {
-      const sources = await resource<{ name: string; useFor: string; domains: string[]; crossChecked: boolean }[]>("forge://sources");
+      const sources = await resource<{ name: string; kind?: string; useFor: string; domains: string[]; crossChecked: boolean }[]>("forge://sources");
+      const KIND: Record<string, string> = { live: "Live data", knowledge: "Knowledge", fact: "Exact facts", calculation: "Calculation" };
       for (const src of sources) {
         const li = el("li");
-        li.append(el("b", undefined, src.name + (src.crossChecked ? " ✓" : "")), document.createTextNode(src.useFor + " "), el("code", undefined, src.domains.join(", ")));
+        li.append(
+          el("b", undefined, src.name + (src.crossChecked ? " ✓" : "")),
+          el("span", "kind", KIND[src.kind ?? "live"]),
+          document.createTextNode(src.useFor + " "),
+          el("code", undefined, src.domains.length ? src.domains.join(", ") : "no website"),
+        );
         if (src.crossChecked) li.title = "Numbers from this source are cross-checked";
         list.append(li);
       }
@@ -647,8 +728,7 @@ async function useSkill({ skill, input, missing, via }: Routed) {
     return;
   }
   const ran = `ran in the sandbox in ${took(performance.now() - t0)}`;
-  answerCard(skill, sc.speech, sc.data, via ? `${via} · ${ran}` : `Learned skill · ${ran}`);
-  speak(sc.speech);
+  speak(await presentAnswer(skill, sc.speech, sc.data, via ? `${via} · ${ran}` : `Learned skill · ${ran}`));
   void refresh();
 }
 
@@ -658,7 +738,8 @@ async function learn(utterance: string): Promise<{ skill?: Skill; answered: bool
   buildBegin(utterance);
   building = true;
   let result: CallToolResult | undefined;
-  const stream = client.experimental.tasks.callToolStream({ name: "forge_capability", arguments: { request: utterance } }, CallToolResultSchema, {
+  const kind = ["live", "knowledge", "fact", "calculation"].includes(asking.kind ?? "") ? asking.kind : undefined;
+  const stream = client.experimental.tasks.callToolStream({ name: "forge_capability", arguments: { request: utterance, ...(kind ? { kind } : {}) } }, CallToolResultSchema, {
     timeout: 10 * 60_000,
   });
   for await (const msg of stream) {
@@ -701,10 +782,98 @@ async function learnThenAnswer(utterance: string) {
   }
 }
 
+type Sorted = {
+  type?: "live" | "knowledge" | "fact" | "calculation" | "creative" | "chat" | "advice" | "personal" | "emergency";
+  advice?: AdviceArea;
+  speech?: string;
+  rewritten?: string;
+  fallback?: true;
+  by?: string;
+  ms?: number;
+};
+
+/** What kind of question this is (src/answers.ts): an emergency, a skill's job, or one answered without a skill. */
+async function sortQuestion(utterance: string): Promise<Sorted> {
+  return fetch("/assistant/sort", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ utterance, previous: lastQuestion || undefined }),
+  })
+    .then((res) => res.json())
+    .catch(() => ({ fallback: true }));
+}
+
+const HELPLINES: [string, string][] = [
+  ["Emergency 112", "tel:112"],
+  ["Ambulance 108", "tel:108"],
+  ["Tele-MANAS 14416", "tel:14416"],
+];
+
+/** Said first and plainly, with the numbers to call: no model, no skill. */
+function emergencyCard(speech: string) {
+  const card = el("div", "card emergency");
+  card.append(el("div", "card-kicker", "Get help now"), el("div", "card-title", speech));
+  const row = el("div", "actions");
+  for (const [label, href] of HELPLINES) {
+    const a = el("a", "call", label);
+    a.href = href;
+    row.append(a);
+  }
+  card.append(row);
+  addCard(card);
+  speak(speech);
+}
+
+/** Personal data or an action: what can't be done, and a few things that can. */
+function cannotCard(speech: string) {
+  const card = el("div", "card cannot");
+  card.append(el("div", "card-kicker", "Not something I can do"), el("p", "card-body", speech));
+  const chips = el("div", "chips small");
+  for (const text of SUGGESTIONS.slice(0, 4)) {
+    const b = el("button", undefined, text);
+    b.type = "button";
+    b.onclick = () => void ask(text);
+    chips.append(b);
+  }
+  card.append(chips);
+  addCard(card);
+  speak(speech);
+}
+
+/** Chat and creative writing: the model's own words, labelled, with nothing to check. */
+async function chatReply(utterance: string, type: "chat" | "creative") {
+  const r: { speech?: string | null; by?: string; ms?: number } = await fetch("/assistant/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ utterance, type }),
+  })
+    .then((res) => res.json())
+    .catch(() => ({}));
+  if (!r.speech) return say("Sorry, I couldn't come up with anything for that.");
+  if (type === "chat") return say(r.speech);
+  const card = el("div", "card answer creative");
+  card.append(el("div", "card-kicker", "Written for you"), el("div", "card-title", r.speech));
+  const cite = el("div", "cite");
+  cite.append(el("span", "tag warn", "Written by the model · not checked"));
+  card.append(cite, el("div", "via", `${r.by} wrote it in ${took(r.ms ?? 0)}`));
+  addCard(card);
+  speak(r.speech);
+}
+
+// A spoken "yes, keep it" or "not now" answers the open "Keep this skill?" card.
+let pendingConsent: ((keep: boolean) => void) | undefined;
+const YES = /^(yes|yeah|yep|sure|ok(ay)?|keep( it)?|please do|do it)\b/i;
+const NO = /^(no|nope|not now|skip( it)?|don'?t|no thanks|discard)\b/i;
+
 async function ask(utterance: string) {
   if (busy || !utterance.trim()) return;
   $("app").classList.remove("left-open");
   $("scrim").hidden = !$("app").classList.contains("right-open");
+  if (pendingConsent && (YES.test(utterance.trim()) || NO.test(utterance.trim()))) {
+    addMsg("user", utterance);
+    pendingConsent(YES.test(utterance.trim()));
+    return;
+  }
   busy = true;
   state.thinking = true;
   showState();
@@ -712,13 +881,26 @@ async function ask(utterance: string) {
   addMsg("user", utterance);
   const doneTyping = typing();
   try {
-    const routed = await route(utterance);
-    const asked = understood ?? utterance;
+    // 1. What kind of question: emergencies first, then whether it needs a skill at all.
+    const sorted = await sortQuestion(utterance);
+    if (sorted.type === "emergency" && sorted.speech) return emergencyCard(sorted.speech);
+    const asked = sorted.rewritten ?? utterance;
     if (asked !== utterance) addMsg("note", `Understood as: “${asked}”`);
+    if (sorted.type === "personal" && sorted.speech) return cannotCard(sorted.speech);
+    if (sorted.type === "chat" || sorted.type === "creative") {
+      // "Show me that as code", "is that safe?": about the last answer, not new chat.
+      if (last && (await followUp(asked))) return;
+      return await chatReply(asked, sorted.type);
+    }
+    // 2. A skill's job: live data, knowledge, a fact, a calculation (or advice, from knowledge).
+    // Advice is answered from knowledge (Wikipedia), with its note.
+    const kind = sorted.type === "advice" ? "knowledge" : sorted.type;
+    asking = { question: asked, advice: sorted.advice, kind };
+    const routed = await route(asked, undefined, kind);
     if (routed) {
       lastQuestion = asked;
       await useSkill(routed);
-    } else if (await followUp(utterance)) {
+    } else if (await followUp(asked)) {
       // answered from the last answer; nothing to learn
     } else if (building) say("I'm still learning the last thing you asked. Ask me this again in a minute.");
     // Learning runs in the background, so the conversation can go on meanwhile.
@@ -741,6 +923,7 @@ $("ask").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = input.value;
   input.value = "";
+  voiceTurn = false;
   void ask(text);
 });
 
@@ -787,34 +970,51 @@ window.addEventListener("resize", syncPanes);
 syncPanes();
 
 // ---------- voice in ----------
+// Conversation mode: after a spoken answer to a spoken question, the mic stays open
+// for a few seconds, like Alexa's follow-up mode, so the next question needs no click.
 
 type Recognition = { lang: string; interimResults: boolean; start(): void; stop(): void; onresult: (e: any) => void; onend: () => void; onerror: (e: any) => void };
 const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
 let rec: Recognition | undefined;
-orb.onclick = () => {
-  if (state.speaking) return stopSpeaking();
-  if (rec) return rec.stop();
+/** The last question was spoken, so a spoken answer may be followed by listening again. */
+let voiceTurn = false;
+const FOLLOW_UP_MS = 8000;
+
+function listen(followUp = false) {
   if (!SR) return addMsg("note", "Voice input needs Chrome. You can type instead.");
   rec = new SR() as Recognition;
   rec.lang = "en-IN";
   rec.interimResults = true;
   state.listening = true;
   showState();
+  let heard = false;
+  // A follow-up window closes by itself if nothing is said.
+  const closer = followUp ? setTimeout(() => !heard && rec?.stop(), FOLLOW_UP_MS) : undefined;
+  if (followUp) $("hint").textContent = "Listening for a follow-up… (or click the mic to stop)";
   rec.onresult = (e) => {
+    heard = true;
     const r = e.results[e.results.length - 1];
     input.value = r[0].transcript;
     if (r.isFinal) {
       input.value = "";
+      voiceTurn = true;
       void ask(r[0].transcript);
     }
   };
   rec.onerror = (e) => e.error !== "no-speech" && e.error !== "aborted" && addMsg("note", `Mic: ${e.error}`);
   rec.onend = () => {
+    clearTimeout(closer);
     rec = undefined;
     state.listening = false;
     showState();
   };
   rec.start();
+}
+
+orb.onclick = () => {
+  if (state.speaking) return stopSpeaking();
+  if (rec) return rec.stop();
+  listen();
 };
 
 // ---------- voice out ----------
@@ -826,9 +1026,20 @@ setupVoice({
   onSpeaking: (on) => {
     state.speaking = on;
     showState();
+    // Conversation mode: a spoken answer to a spoken question opens the mic again.
+    if (!on && voiceTurn && conversation() && !rec && !busy) listen(true);
   },
 });
 $<HTMLInputElement>("speak").addEventListener("change", (e) => (e.target as HTMLInputElement).checked || stopSpeaking());
+const conversation = () => $<HTMLInputElement>("converse").checked;
+try {
+  $<HTMLInputElement>("converse").checked = localStorage.getItem("forge.converse") !== "off";
+} catch {}
+$<HTMLInputElement>("converse").addEventListener("change", (e) => {
+  try {
+    localStorage.setItem("forge.converse", (e.target as HTMLInputElement).checked ? "on" : "off");
+  } catch {}
+});
 document.addEventListener("keydown", (e) => e.key === "Escape" && stopSpeaking());
 
 // ---------- start ----------

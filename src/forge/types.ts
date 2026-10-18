@@ -8,7 +8,11 @@ export interface ToolTest {
 }
 
 export interface Reference {
-  /** ES module whose default export `async (input, { fetched }) => (number | string)[]` returns the values (or headlines) the source reports; `fetched` lists the URLs the skill requested. */
+  /**
+   * ES module whose default export `async (input, { fetched })` returns what the source reports; `fetched` lists the URLs the skill requested:
+   * `(number | string)[]` (the answer must match one number, or quote one headline), `{ every: string[] }` (it must quote each),
+   * or `{ anyOf: string[] }` (it must name one of them, as whole words: a capital city, a person).
+   */
   code: string;
   relTol?: number;
   absTol?: number;

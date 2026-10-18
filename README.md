@@ -11,6 +11,7 @@ Forge is an MCP server that lets the assistant build it itself:
 When no tool fits a request, Forge writes a new skill against a named public source, tests it live in a locked-down sandbox on the user's own question, checks its answer against the source itself, and gives the user that answer right away. Then it asks whether to keep the skill (showing exactly which sites it will reach). Next time, it answers instantly.
 
 - **Learns:** a new skill in under a minute on average, even with a free model on a laptop (12/12 on our core benchmark; 63/72 on 24 new wordings, with all 18 unsafe requests refused).
+- **A real helper:** it sorts every question first. Live data, explanations, exact facts and calculations go to skills (each with its own source and check); chat and creative writing are answered by the model and labelled as such; health, legal and money questions get general information with a note to see a professional; emergencies get the numbers to call within a second; requests for your accounts or for actions get a clear "I can't" and what it can do instead.
 - **Safe:** every run in a fresh locked-down container that can only reach the skill's declared sites; nothing installs without the user's OK.
 - **Trustworthy:** every answer names its source (*"The air quality in Delhi is unhealthy, with an AQI of 164. Source: Open-Meteo."*), and its numbers (or, for news, its headlines) are cross-checked against the source before a skill is accepted. It catches the kind of mistake a model really made during our testing: a currency answer 100× too high (`scripts/crosscheck-demo.ts`).
 
@@ -43,6 +44,7 @@ user request ─▶ forge_capability ─▶ Smith (local model or Claude)
 Alexa+ reads the tool list only at deployment and expects answers in under 500 ms ([MCP Toolkit quickstart](https://developer.amazon.com/docs/alexaplus/add-ons/mcp-toolkit-quickstart.html)). So Forge never needs a new tool to be visible to work:
 
 - **`use_skill(name, input)`** runs any learned skill through a fixed tool surface.
+- `forge_capability` takes the request and, optionally, the `kind` of answer the assistant expects (`live`, `knowledge`, `fact` or `calculation`), a hint for picking the source. A knowledge skill's result carries the passages that answer the question, with an instruction to answer only from them.
 - A plain `forge_capability` call answers *"I'm learning that now"* after `FORGE_WAIT_MS` (200 ms) and finishes in the background.
 - **The user hears back without asking.** When a background build finishes, the news rides along with the next answer from any Forge tool, answer included (*"Also tell the user: I've learned how to answer "what's the weather in Pune": It's 23 degrees in Pune right now. Source: Open-Meteo. Should I keep this skill…"*), once per session, so a voice assistant that only reads tool results still passes it on. Connected clients are also told at once with an MCP log notice (`level: "notice"`, `data.stage: "skill_ready"` or `"skill_failed"`); the demo page speaks the answer and asks whether to keep the skill. (A true push to an Echo device would go through Alexa's own notifications, which MCP add-ons can't send today.)
 - **`list_capabilities`** reports progress and skills waiting for approval (*"Current Weather is ready and needs your OK. It will only access api.open-meteo.com…"*); the user says yes by voice and the assistant calls **`approve_capability`**.
@@ -116,7 +118,7 @@ Every skill must pass a live test on an example input whose answer is a real spo
 
 ### Real-time data
 
-Skills answer from live public APIs, fetched when the user asks: 12 verified, keyless sources in `src/forge/catalog.ts` (weather, air quality, the ISS, currency rates, crypto prices, Wikipedia, news, Hacker News, a dictionary, rocket launches, earthquakes, public holidays). The demo page lists them under **How it works**; any MCP client can read the `forge://sources` resource. Requests outside them are declined rather than guessed.
+Skills answer from 17 verified, keyless sources in `src/forge/catalog.ts`, fetched when the user asks: live data (weather, air quality, the ISS, currency rates, crypto prices, news, Hacker News, rocket launches, earthquakes, public holidays), knowledge (Wikipedia, a dictionary), exact facts (Wikidata), and calculations that need no website at all (a calculator, a unit converter, days until a date, and a world clock that only looks up a city's time zone). The demo page lists them under **How it works**; any MCP client can read the `forge://sources` resource. Requests outside them are declined rather than guessed.
 
 News comes from Google News (RSS): a question about a topic, like *"What car model has Elon Musk launched recently?"*, searches for it, and a general one, like *"What's today's hot news?"*, reads the top stories. Explicit and spam stories are dropped before anything is read (see the safety model). A small model reads XML poorly, so the catalog gives it a short parsing recipe, and the cross-check re-reads the very feed the skill fetched: the answer must quote one of its headlines. On the three news requests in `--large`, over the last two benchmarks (two runs each, 12 builds): 11 built, every answer real, current headlines with their publishers, and 1 refused after its retries; no wrong answers (`bench/large-2026-10-18T0807.json`, `…T0818.json`). Those builds sometimes fixed the topic in the code: a skill learned for Elon Musk's car, named `get_latest_launches`, later answered *"When is the next rocket launch?"* with car news. So the news source now always makes one general skill, `get_news(topic)`, with the user's topic as its test example, and the cross-check rejects a skill that searches for anything but its topic input. After that change all three news requests built `get_news` (`bench/large-2026-10-18T1002.json`), and later news questions reuse it without learning anything new. Rocket launches had the same flaw: a skill learned for "When is the next rocket launch?" took no input, so "When is NASA's next launch?" got a SpaceX rideshare. The launch source now makes one `get_next_launch(agency?)` skill, and its cross-check requires the answer to name a launch from the list the skill read, searched for the agency asked about (NASA → Artemis III). The two runs before these fixes are kept in `bench/` too: one built skills that said "Unknown headline" (now caught as placeholder text and by the headline check), the other failed on quote marks in the recipe. Google News feeds are offered for personal, non-commercial use; a published add-on would use a licensed news API instead (GDELT, the free alternative we tried, rate-limited every request from our network).
 
@@ -132,6 +134,33 @@ A from-scratch build with `qwen2.5-coder:7b` on a 4 GB laptop GPU spends its tim
 - **Input problems are not code problems.** "What are the main four pillars of the OOP and what is API" once spent 100 s rewriting working code: the whole question had been passed to Wikipedia as the topic, the skill rightly said it wasn't found, and that answer was taken for a broken skill. Now a sentence-long value is extracted again as a short name, an abbreviation counts as something the user said (OOP → Object-oriented programming), a two-part question fills both topics (OOP and API, answered from both summaries in 6 s), and when the code's second test passes but the user's own value finds nothing, Forge says so at once instead of rewriting the code.
 
 `scripts/forge-bench.ts` from scratch, after these changes: 13/13 as expected, 11 of the 12 builds on the first attempt, most in 23–43 s, weather about 80 s, slowest 92 s (`bench/` has the run). Before them, the same requests took up to 219 s and two weren't built.
+
+## What Forge answers
+
+Every question is sorted first (`src/answers.ts`, one schema-constrained call, about 2 s), and each kind takes its own path, with its own source and its own check. The answer card says which:
+
+| Kind | Example | Answered by | Checked how | Label |
+|---|---|---|---|---|
+| Live data | "Will it rain in Mumbai tomorrow?" | a live skill | the answer's numbers or headlines against the source | Live data · cross-checked |
+| Knowledge | "What are the four pillars of OOP and what is an API?" | `explain_topic`: the Wikipedia articles' summaries plus the passages that answer the question | every name and number in the written answer, and 85% of its other words, must be in the passages; otherwise the article's own words are used | Written from the article, checked against it |
+| Exact fact | "When was ISRO founded?" | `get_fact` (Wikidata) | the value against Wikidata itself | Exact fact · cross-checked |
+| Calculation | "What is 18% of 2500?", "5 km in miles", "days until 1 January", "time in Tokyo" | calculator, unit converter, calendar, world clock (no website, except a time-zone lookup) | a second, independent implementation (a shunting-yard calculator checks the recursive-descent one the model writes) | Calculated · cross-checked |
+| Chat, creative | "Hello", "Write a short poem about the monsoon" | the model | nothing to check | Written by the model · not checked |
+| Advice | "I have a fever and a headache, what should I take?" | the knowledge path | as knowledge | plus *"This is general information, not medical advice: please see a doctor…"* |
+| Emergency | "My father has chest pain and can't breathe" | fixed rules, no model, under a second | — | 112, 108 and Tele-MANAS 14416 as buttons |
+| Personal, actions | "Read my emails", "Book me a cab" | a fixed reply | — | what it can do instead |
+
+**Knowledge, the Alexa+ way.** A knowledge skill doesn't speak an answer it made up: it returns the Wikipedia summaries plus the paragraphs that answer the exact question (chosen by section headings and keywords: for the pillars of OOP, the *Encapsulation*, *Inheritance* and *Polymorphism* sections). The assistant writes the answer from those passages, and only from them; the tool result tells an LLM client like Alexa+ to do the same. On the demo page the local model writes it, and `supported()` checks it: an answer that brings in a name, a number or too many words the passages don't contain is rejected (up to three tries), and the article's own words are used instead. It is a word-level check, so it catches invented facts, not every loose paraphrase.
+
+**Exact facts and calculations** use the same machinery as live data: a general skill per source, an exact code shape, a hand-written reference that computes the same answer independently, and the second live test with other values.
+
+**Getting the topic right.** "What are the main four pillars of the OOP and what is API" becomes two topics, *Object-oriented programming* and *API*; "I have a fever and a headache" becomes *fever* and *headache*; an abbreviation counts as the user's own words (OOP), and Wikipedia's full-text search turns a near-miss title into the right article ("TCP" → Transmission Control Protocol).
+
+**Emergencies** are matched by fixed rules before any model runs, and only when someone is involved ("my father has chest pain"), so "What is a heart attack?" is an ordinary knowledge question. Self-harm always gets the helpline (Tele-MANAS, 14416, free and 24×7).
+
+**Conversation mode.** After a spoken answer to a spoken question, the mic stays open for 8 seconds, like Alexa's follow-up mode, so the next question needs no click; "yes, keep it" or "not now" answers the *Keep this skill?* card by voice. Short follow-ups are rewritten into full questions ("What about ISRO?"), and questions about the last answer are answered from it.
+
+`scripts/sort-check.ts`: 52/52 questions sorted correctly, across all eight kinds and emergencies (one live/calculation mix-up, which changes nothing the user sees), 2.1 s on average. `scripts/answers-check.ts` tests the emergency rules and the passage check without a model. `scripts/types-check.ts` runs 17 requests end to end (learned or reused, run, and the answer's content checked): knowledge 5/5 (the four pillars of OOP and what an API is; photosynthesis; TCP vs UDP; Ada Lovelace; why the sky is blue), exact facts 5/5 (Canberra; Japan's population; Everest's 8,848.86 m; ISRO founded 15 August 1969; Thailand's baht), calculations 5/5 (18% of 2500; 5 km in miles; 72 °F in Celsius; days until 1 January 2027; the time in Tokyo), live data 2/2. With saved recipes most answers take 6–30 s; a kind learned from scratch takes about 1–2 minutes. Building it found real bugs, now fixed and tested: an encyclopedia's own words ("error-checked delivery") tripped the "something went wrong" check, so knowledge answers have a narrower one; "72 °F in Celsius" was answered "those units can't be converted" and passed, because the unit names weren't turned into codes and the cross-check skipped units it didn't know (now it fails them); "Which currency does Thailand use?" went to the currency converter (the learner now gets the sorter's kind of answer as a hint, the `kind` argument of `forge_capability`); and Wikipedia started refusing anonymous requests, so the relay now identifies Forge with its project page, as Wikimedia asks.
 
 ## From learned skill to certifiable add-on
 
@@ -235,6 +264,9 @@ npx tsx scripts/router-check.ts   # the demo page's skill routing on 33 paraphra
 npx tsx scripts/followup-check.ts # learn a skill, then ask related questions: reuse it or learn anew? (needs a real provider)
 npx tsx scripts/conversation-check.ts  # follow-ups about the last answer, and short ones rewritten (needs a real provider)
 npx tsx scripts/grounded-check.ts # a follow-up answer may only repeat numbers from the last answer
+npx tsx scripts/answers-check.ts  # emergencies caught by rules (and general questions not), answers held to their passages
+npx tsx scripts/sort-check.ts     # 52 questions sorted into live, knowledge, fact, calculation, chat, creative, advice, personal (needs a real provider): 52/52 twice
+npx tsx scripts/types-check.ts    # each kind end to end: learned or reused, run, and the answer's content checked (needs a real provider)
 npx tsx scripts/content-filter-check.ts  # spam and explicit headlines dropped, real news kept, "hot news" = top headlines
 npx tsx scripts/build-profile.ts  # where a from-scratch build spends its time, step by step (needs a real provider)
 npx tsx scripts/recipe-check.ts   # new questions answered by reusing saved, re-tested code (run npm run warm-up first)
@@ -246,11 +278,14 @@ npx tsx scripts/recipe-check.ts   # new questions answered by reusing saved, re-
 src/
   index.ts            HTTP server: Streamable HTTP sessions, demo client, /health
   assistant.ts        the demo page's assistant brain: which skill answers a request (not part of the MCP server)
+  answers.ts          the rest of it: what kind of question, emergencies, chat, and answers written from a skill's passages
   voice.ts            the demo page's natural voice (Kokoro on the CPU; not part of the MCP server)
   server.ts           MCP server: tools, task, elicitation, resources
   forge/smith.ts      the agent loop that researches, writes, tests and repairs a skill
   forge/guided.ts     the guided smith for small local models
-  forge/catalog.ts    verified keyless public APIs
+  forge/catalog.ts    verified keyless sources (live data, knowledge, facts, calculations), each with its general skill
+  forge/recipes.ts    code that passed, reused and re-tested for the next request of its kind
+  sandbox/content-filter.ts  explicit and spam stories dropped from feeds before any skill reads them
   forge/validate.ts   static checks on generated code
   forge/registry.ts   persisted skills, shared by all sessions
   forge/export.ts     a learned skill as a standalone MCP server folder, for review

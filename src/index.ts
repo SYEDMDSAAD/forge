@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { chatAnswer, composeAnswer, emergency, personalReply, sortQuestion, type Passage } from "./answers.js";
 import { followUp, route, standalone } from "./assistant.js";
 import { config } from "./config.js";
 import { warmSandbox } from "./sandbox/sandbox.js";
@@ -61,11 +62,68 @@ app.post("/assistant/route", async (req: Request, res: Response) => {
   try {
     const previous = typeof req.body.previous === "string" ? req.body.previous.slice(0, 500) : undefined;
     const asked = only ? utterance.slice(0, 500) : await standalone(utterance.slice(0, 500), previous);
-    const r = await route(asked, skills.slice(0, 100), typeof only === "string" ? only : undefined);
+    const kind = ["live", "knowledge", "fact", "calculation"].includes(req.body.kind) ? req.body.kind : undefined;
+    const r = await route(asked, skills.slice(0, 100), typeof only === "string" ? only : undefined, kind);
     res.json(r ? { ...r, ...(asked !== utterance ? { rewritten: asked } : {}) } : { fallback: true });
   } catch (e) {
     console.error("route failed:", e);
     res.json({ fallback: true });
+  }
+});
+
+// What kind of question this is (after an emergency check and rewriting a short follow-up).
+app.post("/assistant/sort", async (req: Request, res: Response) => {
+  const { utterance, previous } = req.body ?? {};
+  if (typeof utterance !== "string") {
+    res.status(400).json({ error: "utterance is required" });
+    return;
+  }
+  const urgent = emergency(utterance);
+  if (urgent) {
+    res.json({ type: "emergency", speech: urgent });
+    return;
+  }
+  try {
+    const asked = await standalone(utterance.slice(0, 500), typeof previous === "string" ? previous.slice(0, 500) : undefined);
+    const sorted = await sortQuestion(asked);
+    if (!sorted) return void res.json({ fallback: true });
+    res.json({ ...sorted, ...(asked !== utterance ? { rewritten: asked } : {}), ...(sorted.type === "personal" ? { speech: personalReply() } : {}) });
+  } catch (e) {
+    console.error("sort failed:", e);
+    res.json({ fallback: true });
+  }
+});
+
+// Chat and creative writing: answered by the model, no skill.
+app.post("/assistant/chat", async (req: Request, res: Response) => {
+  const { utterance, type } = req.body ?? {};
+  if (typeof utterance !== "string" || (type !== "chat" && type !== "creative")) {
+    res.status(400).json({ error: "utterance and type (chat or creative) are required" });
+    return;
+  }
+  try {
+    res.json((await chatAnswer(utterance.slice(0, 1000), type)) ?? { speech: null });
+  } catch (e) {
+    console.error("chat failed:", e);
+    res.json({ speech: null });
+  }
+});
+
+// A knowledge skill's passages turned into a short answer to the exact question, checked against them.
+app.post("/assistant/compose", async (req: Request, res: Response) => {
+  const { question, passages, advice } = req.body ?? {};
+  const valid = Array.isArray(passages) && passages.every((p: unknown) => typeof (p as Passage)?.text === "string" && typeof (p as Passage)?.topic === "string");
+  if (typeof question !== "string" || !valid) {
+    res.status(400).json({ error: "question and passages [{ topic, text }] are required" });
+    return;
+  }
+  try {
+    const area = ["medical", "legal", "financial"].includes(advice) ? advice : undefined;
+    const clipped = (passages as Passage[]).slice(0, 8).map((p) => ({ topic: p.topic.slice(0, 200), text: p.text.slice(0, 1200) }));
+    res.json((await composeAnswer(question.slice(0, 500), clipped, area)) ?? { speech: "", checked: false });
+  } catch (e) {
+    console.error("compose failed:", e);
+    res.json({ speech: "", checked: false });
   }
 });
 

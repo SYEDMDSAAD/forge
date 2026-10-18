@@ -19,12 +19,14 @@ export interface RouteSkill {
   inputSchema: { properties?: Record<string, { type?: string; description?: string }>; required?: string[] };
   /** The question it was learned for: a concrete example of what it answers. */
   request?: string;
+  /** live, knowledge, fact or calculation (from its source). */
+  kind?: string;
 }
 
 type Picked = { skill: null } | { skill: string; input: Record<string, unknown>; missing: string[] };
 export type Route = Picked & { by: string; ms: number };
 
-const routerModel =
+export const routerModel =
   process.env.FORGE_ROUTER_MODEL ?? { anthropic: "claude-haiku-5-5", bedrock: "anthropic.claude-haiku-5-5", ollama: config.model, mock: "" }[config.provider];
 
 const SYSTEM =
@@ -48,7 +50,7 @@ function missingOf(skill: RouteSkill, input: Record<string, unknown>): string[] 
 // A small model offered one skill tends to pick it for anything nearby (weather
 // for air quality), so it checks each pick as a plain yes/no question. A pick it
 // rejects is left out of a second try.
-async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<RouteSkill | undefined> {
+async function pickSkill(utterance: string, skills: RouteSkill[], trustGeneral = false): Promise<RouteSkill | undefined> {
   let left = skills;
   for (let attempt = 0; attempt < 2 && left.length; attempt++) {
     const pick = await askOllama<{ skill: string }>(
@@ -59,6 +61,8 @@ async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<Route
     );
     const skill = left.find((s) => s.name === pick.skill);
     if (!skill) return undefined;
+    // The one general skill of the question's kind (explain_topic for a knowledge question) answers it.
+    if (trustGeneral && GENERAL.has(skill.name)) return skill;
     const check = await askOllama<{ answers: boolean }>(
       SYSTEM,
       `The user asked: "${utterance}"\n\nSkill: ${skill.description}${example(skill) ? `\nIt was learned for questions like: "${example(skill)}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather now is not tomorrow's forecast, weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography, news headlines are not a schedule (when the next rocket launch or match is).`,
@@ -72,8 +76,13 @@ async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<Route
 }
 
 /** Small local model: pick the skill, then fill its inputs, each constrained to a JSON schema. */
-async function routeOllama(utterance: string, skills: RouteSkill[], only?: string): Promise<Picked> {
-  const skill = only ? skills.find((s) => s.name === only) : await pickSkill(utterance, skills);
+async function routeOllama(utterance: string, skills: RouteSkill[], only?: string, kind?: string): Promise<Picked> {
+  // The question's kind (from the sorter) narrows the choice to skills of that kind, when there are any.
+  const pool = kind ? skills.filter((s) => s.kind === kind) : [];
+  // Knowledge and facts each have one general skill that answers every question of the kind; live data and
+  // calculations have several different ones (weather is not air quality), so those picks are still checked.
+  const trust = pool.length > 0 && (kind === "knowledge" || kind === "fact");
+  const skill = only ? skills.find((s) => s.name === only) : await pickSkill(utterance, pool.length ? pool : skills, trust);
   if (!skill) return { skill: null };
   const props = skill.inputSchema.properties ?? {};
   if (!Object.keys(props).length) return { skill: skill.name, input: {}, missing: [] };
@@ -87,13 +96,23 @@ async function routeOllama(utterance: string, skills: RouteSkill[], only?: strin
     "You fill in a skill's inputs from what the user said. Reply only with JSON matching the schema.",
     `Skill ${skill.name}: ${skill.description}\nInputs:\n${Object.entries(props)
       .map(([k, p]) => `- ${k} (${p.type ?? "string"}): ${p.description ?? ""}`)
-      .join("\n")}\n\nUser: "${utterance}"\n\nUse the user's values, converted to the form each input asks for (for example a currency name to its ISO code). Use null for anything the user didn't say.`,
+      .join("\n")}\n\nUser: "${utterance}"\n\nUse the user's values, converted to the form each input asks for (for example a currency name to its ISO code). Use null for anything the user didn't say, except an input that asks for your best guess: fill that in.`,
     schema,
     0,
   );
   // "today's hot news" names no topic: leave it out, so the skill reads the top headlines.
   const generic = genericInputs.get(skill.name) ?? [];
   const input = Object.fromEntries(Object.entries(raw).filter(([k, v]) => v !== null && v !== "" && !(generic.includes(k) && typeof v === "string" && isGeneric(v))));
+  // A knowledge skill finds the passages that answer the question by these words: always give it some.
+  if (props.keywords && !input.keywords) {
+    const { keywords } = await askOllama<{ keywords: string }>(
+      "You help find the part of a Wikipedia article that answers a question.",
+      `Question: "${utterance}"\n\nGive 2 to 5 words likely to appear in the paragraphs that answer it (for \"why do leaves change colour in autumn\": chlorophyll pigment carotenoid).`,
+      { type: "object", properties: { keywords: { type: "string" } }, required: ["keywords"] },
+      0,
+    );
+    if (keywords?.trim()) input.keywords = keywords.trim();
+  }
   return { skill: skill.name, input, missing: missingOf(skill, input) };
 }
 
@@ -120,10 +139,10 @@ async function routeClaude(utterance: string, skills: RouteSkill[], only?: strin
  * Picks the skill for `utterance` (or, with `only`, just fills that skill's inputs).
  * Returns undefined when no model is configured (mock provider), so the page can fall back.
  */
-export async function route(utterance: string, skills: RouteSkill[], only?: string): Promise<Route | undefined> {
+export async function route(utterance: string, skills: RouteSkill[], only?: string, kind?: string): Promise<Route | undefined> {
   if (config.provider === "mock" || !skills.length) return undefined;
   const t0 = performance.now();
-  const r = config.provider === "ollama" ? await routeOllama(utterance, skills, only) : await routeClaude(utterance, skills, only);
+  const r = config.provider === "ollama" ? await routeOllama(utterance, skills, only, kind) : await routeClaude(utterance, skills, only);
   return { ...r, by: routerModel, ms: Math.round(performance.now() - t0) };
 }
 

@@ -20,7 +20,9 @@ export const config = {
   // Ollama serves an Anthropic-compatible Messages API; used as a free local stand-in during development.
   ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
   // Ollama defaults to a 4k context, too small for Forge's prompts.
-  ollamaContext: Number(process.env.OLLAMA_CONTEXT ?? 8192),
+  // 6144 fits Forge's largest prompts (a repair: docs, real responses, the previous code) with room for the reply,
+  // and keeps the model off swap on a 16 GB laptop, where 8192 measured 0.7 tokens/s against 11.5.
+  ollamaContext: Number(process.env.OLLAMA_CONTEXT ?? 6144),
   /** How long Ollama keeps the model loaded after a request (Ollama's own default is 5 minutes). */
   ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE ?? "30m",
   // "agent": open-ended tool-use loop (Claude). "guided": short JSON-schema steps

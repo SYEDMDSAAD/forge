@@ -67,6 +67,7 @@
           </form>
           <div class="voice">
             <label class="switch"><input type="checkbox" id="speak" checked /><span></span> Speak answers</label>
+            <label class="switch" title="After a spoken answer to a spoken question, keep listening for a few seconds for a follow-up"><input type="checkbox" id="converse" checked /><span></span> Conversation mode</label>
             <select id="voice" title="Voice" aria-label="Voice"></select>
             <span id="voiceStatus"></span>
             <span class="hint" id="hint"></span>
@@ -113,6 +114,16 @@
       <li><b>Cross-check.</b> For sources marked ✓ below, Forge's own trusted reference reads the same values from the source (a temperature, a rate, today's headlines, Wikipedia's summary); the answer must match them. Anything that fails is repaired and retried, up to <span id="how-attempts">4</span> attempts, or it is not kept.</li>
       <li><b>Answer, then your OK.</b> The test ran on your own question, so you get that answer right away, with its source. Then you choose whether to keep the skill, after seeing every site it can reach. Keep it, and next time it's instant.</li>
     </ol>
+    <h3>What I answer, and how each answer is checked</h3>
+    <ul class="kinds">
+      <li><b>Live data</b> (weather, news, prices, launches): a live skill, its answer cross-checked against the source.</li>
+      <li><b>Knowledge</b> (explain, how, why, compare): the Wikipedia article's passages that answer your exact question; the answer is written from them, and every name and number in it must appear in them.</li>
+      <li><b>Exact facts</b> (population, capital, height, dates): Wikidata, cross-checked.</li>
+      <li><b>Calculations</b> (sums, percentages, units, days until a date, time in a city): no website; checked by a second, independent calculator.</li>
+      <li><b>Chat and creative writing</b>: the model's own words, labelled "not checked".</li>
+      <li><b>Health, legal and money questions</b>: general information from Wikipedia, with a note to see a professional. Emergencies get the numbers to call straight away (112, 108, Tele-MANAS 14416).</li>
+      <li><b>Your accounts and actions</b> (email, bank, booking): I say I can't, and what I can do instead.</li>
+    </ul>
     <h3>Where real-time data comes from</h3>
     <p class="muted">Every answer is fetched live from the source when you ask. A repeat within 10 minutes reuses the source's last reply; if a source is down, I say how old the answer is (2 hours at most). ✓ means its answers are cross-checked.</p>
     <ul class="sources" id="sources"></ul>

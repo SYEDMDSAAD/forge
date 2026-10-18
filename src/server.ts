@@ -14,7 +14,7 @@ import * as z from "zod/v4";
 import { ForgeFailed, forgeTool } from "./forge/smith.js";
 import { Registry } from "./forge/registry.js";
 import { sourcesOf } from "./forge/export.js";
-import { CATALOG } from "./forge/catalog.js";
+import { CATALOG, type SourceKind } from "./forge/catalog.js";
 import type { Capability, ForgeEvent } from "./forge/types.js";
 import { runInSandbox } from "./sandbox/sandbox.js";
 import { config } from "./config.js";
@@ -55,13 +55,15 @@ interface ForgeJob {
   message: string;
   startedAt: string;
   capabilityId?: string;
+  /** The kind of answer the caller expects (live data, knowledge, a fact, a calculation), if it knows. */
+  kind?: SourceKind;
   /** The caller stopped waiting ("I'm learning that now"), so the outcome must be announced. */
   background?: boolean;
 }
 const jobs = new Map<string, ForgeJob>();
 
-function trackJob(request: string): ForgeJob {
-  const job: ForgeJob = { id: randomUUID().slice(0, 8), request, status: "learning", message: "Starting", startedAt: new Date().toISOString() };
+function trackJob(request: string, kind?: SourceKind): ForgeJob {
+  const job: ForgeJob = { id: randomUUID().slice(0, 8), request, ...(kind ? { kind } : {}), status: "learning", message: "Starting", startedAt: new Date().toISOString() };
   jobs.set(job.id, job);
   const finished = [...jobs.values()].filter((j) => j.status !== "learning");
   for (const old of finished.slice(0, Math.max(0, finished.length - 20))) jobs.delete(old.id);
@@ -117,6 +119,11 @@ function ago(ms: number): string {
 
 /** Run a learned skill in a fresh sandbox runner; every answer names its source. */
 /** The answer with its source named, unless it already names it. */
+/** Live data, knowledge, a fact or a calculation: shown with every answer. */
+function kindOf(cap: Capability): SourceKind {
+  return CATALOG.find((s) => cap.spec.sources?.includes(s.name) && s.domains.join() === cap.spec.allowedDomains.join())?.kind ?? CATALOG.find((s) => cap.spec.sources?.includes(s.name))?.kind ?? "live";
+}
+
 function cite(cap: Capability, speech: string): string {
   const sources = sourcesOf(cap);
   return sources.some((s) => speech.toLowerCase().includes(s.toLowerCase())) ? speech : `${speech} Source: ${sources.join(" and ")}.`;
@@ -154,9 +161,16 @@ async function runSkill(cap: Capability, input: Record<string, unknown>): Promis
   const result = out.result as { speech: string; data?: unknown };
   let cited = cite(cap, result.speech);
   if (out.staleMs !== undefined) cited += ` ${sources.join(" and ")} isn't responding, so that's from ${ago(out.staleMs)}.`;
+  // A knowledge skill also returns the passages that answer the question: the assistant
+  // (Alexa+, or the demo page) writes its answer from them, and only from them.
+  const passages = (result.data as { passages?: { topic: string; text: string }[] } | undefined)?.passages;
+  const grounding = Array.isArray(passages) && passages.length
+    ? `To answer the user's exact question, use only these passages from ${sources.join(" and ")}, and say so:\n${passages.map((p) => `[${p.topic}] ${p.text}`).join("\n")}`
+    : undefined;
   return {
     content: [
       { type: "text", text: cited },
+      ...(grounding ? [{ type: "text" as const, text: grounding }] : []),
       ...(result.data !== undefined ? [{ type: "text" as const, text: JSON.stringify(result.data) }] : []),
     ],
     structuredContent: { speech: cited, data: result.data ?? null, sources, ...(out.staleMs !== undefined ? { staleSeconds: Math.round(out.staleMs / 1000) } : {}) },
@@ -181,6 +195,7 @@ function summarize(cap: Capability) {
     allowedDomains: cap.spec.allowedDomains,
     sources: sourcesOf(cap),
     crossChecked: cap.spec.tests.some((t) => t.reference),
+    kind: kindOf(cap),
     tests: cap.testReport.results.map((r) => ({ name: r.name, passed: r.passed, ms: r.durationMs })),
     attempts: cap.attempts,
     uses: cap.uses,
@@ -294,10 +309,14 @@ export function createServer(): McpServer {
     const request = job.request;
     let built;
     try {
-      built = await forgeTool(request, (e) => {
-        job.message = e.message;
-        emit(e);
-      });
+      built = await forgeTool(
+        request,
+        (e) => {
+          job.message = e.message;
+          emit(e);
+        },
+        job.kind,
+      );
     } catch (e) {
       job.status = "failed";
       job.message = e instanceof Error ? e.message : String(e);
@@ -364,17 +383,21 @@ export function createServer(): McpServer {
         "Builds, tests and installs a brand-new skill for a request that no existing tool can handle (anything answerable from public internet data: live status, schedules, prices, notices, feeds, lookups). Learning takes 30-120 seconds; if the client can't wait, this returns at once with status 'learning' and the skill shows up in list_capabilities when it's ready. Pass the user's request in their own words.",
       inputSchema: {
         request: z.string().min(5).describe("What the user wants, in their words, including any specifics (places, names, numbers)"),
+        kind: z
+          .enum(["live", "knowledge", "fact", "calculation"])
+          .optional()
+          .describe("The kind of answer expected, if you know it: live data, an explanation (knowledge), one exact fact, or a calculation"),
       },
       annotations: { openWorldHint: true },
       execution: { taskSupport: "optional" },
     },
     {
-      async createTask({ request }, extra) {
+      async createTask({ request, kind }, extra) {
         const asTask = taskCalls.delete(`${extra.sessionId}:${extra.requestId}`);
         // pollInterval is advice to task clients; for plain calls it paces the SDK's own
         // internal polling, which must not add latency to the "learning" answer.
         const task = await extra.taskStore.createTask({ ttl: extra.taskRequestedTtl ?? 15 * 60_000, pollInterval: asTask ? 1000 : 50 });
-        const job = trackJob(request);
+        const job = trackJob(request, kind);
         const progress = report(extra);
         // A plain call that outlives FORGE_WAIT_MS is answered "still learning";
         // the work carries on detached from the request.
@@ -544,7 +567,7 @@ export function createServer(): McpServer {
         {
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify(CATALOG.map((s) => ({ id: s.id, name: s.name, useFor: s.useFor, domains: s.domains, crossChecked: Boolean(s.reference) }))),
+          text: JSON.stringify(CATALOG.map((s) => ({ id: s.id, name: s.name, kind: s.kind ?? "live", useFor: s.useFor, domains: s.domains, crossChecked: Boolean(s.reference) }))),
         },
       ],
     }),

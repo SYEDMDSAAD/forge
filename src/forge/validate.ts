@@ -40,7 +40,8 @@ export function validateSpec(spec: ToolSpec): string[] {
   for (const [pattern, why] of FORBIDDEN) if (pattern.test(spec.code) || pattern.test(uncommented)) problems.push(why);
   if (spec.code.length > 20000) problems.push("code is too long (20k char limit)");
 
-  if (spec.allowedDomains.length === 0) problems.push("allowed_domains must list every host the tool fetches");
+  // A pure calculation needs no site; anything that fetches must declare its hosts (the sandbox enforces it either way).
+  if (spec.allowedDomains.length === 0 && /\bfetch\s*\(/.test(uncommented)) problems.push("allowed_domains must list every host the tool fetches");
   for (const d of spec.allowedDomains) if (!HOST.test(d)) problems.push(`"${d}" is not a plain public hostname`);
 
   if (spec.tests.length < 1 || spec.tests.length > 5) problems.push("provide 1-5 tests");

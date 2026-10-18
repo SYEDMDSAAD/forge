@@ -1,3 +1,4 @@
+import type { SourceKind } from "./catalog.js";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { createClient, fallbackParams, modelParams } from "../llm.js";
@@ -172,9 +173,9 @@ function describeReport(report: TestReport): string {
  * Agent loop: Claude researches (probe / web search), writes the tool, and
  * iterates against real sandboxed test runs until the tests pass.
  */
-export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => void = () => {}): Promise<SmithResult> {
+export async function forgeTool(request: string, onEvent: (e: ForgeEvent) => void = () => {}, kind?: SourceKind): Promise<SmithResult> {
   if (config.provider === "mock") return (await import("./mock.js")).mockForge(request, onEvent);
-  if (config.smith === "guided") return (await import("./guided.js")).guidedForge(request, onEvent);
+  if (config.smith === "guided") return (await import("./guided.js")).guidedForge(request, onEvent, kind);
   const client = createClient();
   const tools: Anthropic.Beta.BetaToolUnion[] = [PROBE_TOOL, SUBMIT_TOOL, GIVE_UP_TOOL];
   if (config.provider === "anthropic") {
