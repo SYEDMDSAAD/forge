@@ -28,7 +28,13 @@ export interface Source {
    * so a skill learned for one question never answers a different one with a
    * fixed topic, and later questions reuse it.
    */
-  tool?: { name: string; title: string; description: string; input: { name: string; description: string; optional?: boolean } };
+  tool?: {
+    name: string;
+    title: string;
+    description: string;
+    /** `another`: second test values (the first that differs from the user's), to catch a value fixed in the code. */
+    inputs: { name: string; type?: "number"; description: string; optional?: boolean; another: string[] }[];
+  };
 }
 
 // Reference checks. They can't know the input names a model chose, so they read
@@ -203,6 +209,16 @@ export const CATALOG: Source[] = [
     name: "the European Central Bank via Frankfurter",
     useFor: "convert money between currencies, exchange rates (USD, INR, EUR, GBP, JPY...)",
     domains: ["api.frankfurter.dev"],
+    tool: {
+      name: "convert_currency",
+      title: "Convert Currency",
+      description: "Converts an amount of money from one currency to another at today's exchange rate (USD, INR, EUR, GBP, JPY…). Not for cryptocurrencies.",
+      inputs: [
+        { name: "amount", type: "number", description: "the amount of money to convert", another: [] },
+        { name: "from_currency", description: "3-letter code of the currency converted from, e.g. USD", another: ["EUR", "GBP"] },
+        { name: "to_currency", description: "3-letter code of the currency converted to, e.g. INR", another: ["JPY", "AED"] },
+      ],
+    },
     endpoints: [
       {
         url: "https://api.frankfurter.dev/v1/latest?base={FROM}&symbols={TO}",
@@ -218,6 +234,15 @@ export const CATALOG: Source[] = [
     name: "CoinGecko",
     useFor: "cryptocurrency prices (bitcoin, ethereum, solana, dogecoin) and 24h change",
     domains: ["api.coingecko.com"],
+    tool: {
+      name: "get_crypto_price",
+      title: "Crypto Price",
+      description: "The current price and 24-hour change of a cryptocurrency (bitcoin, ethereum, solana, dogecoin…), in US dollars or another currency.",
+      inputs: [
+        { name: "coin", description: "the coin's full name in lowercase, e.g. bitcoin, ethereum, solana, dogecoin", another: ["ethereum", "solana"] },
+        { name: "currency", description: "lowercase currency code to price it in, e.g. usd or inr; leave out for US dollars", optional: true, another: ["inr", "eur"] },
+      ],
+    },
     endpoints: [
       {
         url: "https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies={currency}&include_24hr_change=true",
@@ -225,7 +250,7 @@ export const CATALOG: Source[] = [
         example: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=inr&include_24hr_change=true",
       },
     ],
-    notes: "coin ids are lowercase full names: bitcoin, ethereum, solana, dogecoin. currency is lowercase: inr, usd.",
+    notes: 'coin ids are lowercase full names: bitcoin, ethereum, solana, dogecoin. currency is lowercase: inr, usd; use const cur = (currency || "usd").toLowerCase(). If json[coin] is missing, say that coin was not found. Speech: "One " + coin + " is " + price.toLocaleString("en-IN") + " " + cur.toUpperCase() + ", " + change + " percent in the last 24 hours." (never write a currency name like dollars in the code).',
   },
   {
     id: "wikipedia",
@@ -256,7 +281,7 @@ export const CATALOG: Source[] = [
       name: "get_news",
       title: "Latest News",
       description: "Latest news headlines on any topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.",
-      input: { name: "topic", description: "the news topic in a few keywords, e.g. rocket launch or India cricket" },
+      inputs: [{ name: "topic", description: "the news topic in a few keywords, e.g. rocket launch or India cricket", another: ["India cricket", "Mars rover"] }],
     },
     endpoints: [
       {
@@ -312,7 +337,7 @@ If titles is empty, say no recent news was found. Each title already ends with "
       name: "get_next_launch",
       title: "Next Rocket Launch",
       description: "When the next rocket launch is: any launch, or one by a named agency, company, rocket or mission (NASA, ISRO, SpaceX, Artemis).",
-      input: { name: "agency", description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true },
+      inputs: [{ name: "agency", description: "the agency, company, rocket or mission asked about, e.g. NASA or ISRO; leave out for any launch", optional: true, another: ["ISRO", "Rocket Lab"] }],
     },
     endpoints: [
       {

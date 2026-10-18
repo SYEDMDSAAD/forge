@@ -1,0 +1,18 @@
+[
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "How much is ethereum worth in rupees?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_crypto_price {\"coin\":\"ethereum\",\"currency\":\"inr\"}: \"One ethereum is 2,29,373 INR, -0.93% in the last 24 hours.\""
+  },
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "Convert 100 dollars to euros",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

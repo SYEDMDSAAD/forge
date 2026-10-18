@@ -1,0 +1,178 @@
+[
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_current_weather",
+    "utterance": "What's the temperature in Delhi?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_current_weather {\"city\":\"Delhi\"}: \"The current weather in Delhi is clear, with a temperature of 29°C and a humidity of 51%. There's a 0mm chance of precipitation, and the wind\""
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_current_weather",
+    "utterance": "Will it rain in Mumbai tomorrow?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_current_weather",
+    "utterance": "What's the air quality in Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the weather in Pune right now?",
+    "skill": "get_current_weather",
+    "utterance": "When is sunset in Pune today?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "How much is 50 euros in Japanese yen?",
+    "expect": "use",
+    "ok": true,
+    "shown": "convert_currency {\"amount\":50,\"from_currency\":\"EUR\",\"to_currency\":\"JPY\"}: \"50 EUR is about 8,891 JPY.\""
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What's the price of bitcoin in rupees?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What was the dollar to rupee rate in 2020?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "Any news on Virat Kohli?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_news {\"topic\":\"Virat Kohli\"}: \"Latest news on Virat Kohli: Microsoft CEO Satya Nadella responds to Virat Kohli's first-ever LinkedIn post - The Times of India; Wasim Jaffe\""
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "What's trending on Hacker News?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What is the latest news about ISRO?",
+    "skill": "get_news",
+    "utterance": "When is the next rocket launch?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "When is ISRO's next launch?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_next_launch {\"agency\":\"ISRO\"}: \"The next rocket launch is GSLV Mk II: IRNSS-1L (NVS-03) by Indian Space Research Organization on 31 Oct 2026, 5:30 am India time.\""
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "When did SpaceX last launch a rocket?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "When is the next rocket launch?",
+    "skill": "get_next_launch",
+    "utterance": "Where is the ISS right now?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "How much is ethereum worth in rupees?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_crypto_price {\"coin\":\"ethereum\",\"currency\":\"inr\"}: \"One ethereum is 2,29,501 INR, -0.81% in the last 24 hours.\""
+  },
+  {
+    "learn": "What's the price of bitcoin in dollars?",
+    "skill": "get_crypto_price",
+    "utterance": "Convert 100 dollars to euros",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "get_definition",
+    "utterance": "Define ephemeral",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_definition {\"word\":\"ephemeral\"}: \"The word ephemeral means Something which lasts for a short period of time.\""
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "get_definition",
+    "utterance": "Who was Albert Einstein?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What does serendipity mean?",
+    "skill": "get_definition",
+    "utterance": "Translate hello to Hindi",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "What's the air quality in Delhi?",
+    "skill": "get_air_quality",
+    "utterance": "Is the air clean in Bengaluru?",
+    "expect": "use",
+    "ok": true,
+    "shown": "get_air_quality {\"city\":\"Bengaluru\"}: \"The air quality in Bengaluru is moderate, with an AQI of 57.\""
+  },
+  {
+    "learn": "What's the air quality in Delhi?",
+    "skill": "get_air_quality",
+    "utterance": "What's the weather in Delhi?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Where is the ISS right now?",
+    "skill": "get_iss_location",
+    "utterance": "How many people are in space right now?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Where is the ISS right now?",
+    "skill": "get_iss_location",
+    "utterance": "When will the ISS pass over Pune?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

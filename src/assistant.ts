@@ -55,7 +55,7 @@ async function pickSkill(utterance: string, skills: RouteSkill[]): Promise<Route
     if (!skill) return undefined;
     const check = await askOllama<{ answers: boolean }>(
       SYSTEM,
-      `The user asked: "${utterance}"\n\nSkill: ${skill.description}${skill.request ? `\nIt was learned for questions like: "${skill.request}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography, news headlines are not a schedule (when the next rocket launch or match is).`,
+      `The user asked: "${utterance}"\n\nSkill: ${skill.description}${skill.request ? `\nIt was learned for questions like: "${skill.request}"` : ""}\n\nDoes this skill give the user exactly what they asked for? Something related is not enough: weather now is not tomorrow's forecast, weather is not air quality or sunset time, a currency converter (dollars, rupees, euros) does not price bitcoin or other crypto coins, a word's meaning is not a person's biography, news headlines are not a schedule (when the next rocket launch or match is).`,
       { type: "object", properties: { answers: { type: "boolean" } }, required: ["answers"] },
       0,
     );

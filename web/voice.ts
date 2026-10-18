@@ -47,6 +47,10 @@ export function spoken(text: string): string {
     .replace(/\bAQI\b/g, "A.Q.I.")
     .replace(/\bISS\b/g, "I.S.S.")
     .replace(/(\d)%/g, "$1 percent")
+    .replace(/(\d) (USD|INR|EUR|GBP|JPY|AED)\b/g, (_, d, c) => `${d} ${({ USD: "US dollars", INR: "rupees", EUR: "euros", GBP: "pounds", JPY: "yen", AED: "dirhams" } as Record<string, string>)[c]}`)
+    .replace(/(^|[\s(])-(\d)/g, "$1minus $2")
+    // Indian digit grouping (2,29,373) confuses speech engines; the bare number reads well.
+    .replace(/\d{1,3}(?:,\d{2,3})+/g, (n) => n.replace(/,/g, ""))
     .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (_, y, m, d) => new Date(`${y}-${m}-${d}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }))
     .replace(/\s+/g, " ")
     .trim();

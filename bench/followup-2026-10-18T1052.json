@@ -1,0 +1,26 @@
+[
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "How much is 50 euros in Japanese yen?",
+    "expect": "use",
+    "ok": true,
+    "shown": "convert_currency {\"amount\":50,\"from_currency\":\"EUR\",\"to_currency\":\"JPY\"}: \"50 EUR is about 8,891 JPY.\""
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What's the price of bitcoin in rupees?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  },
+  {
+    "learn": "Convert 100 US dollars to rupees",
+    "skill": "convert_currency",
+    "utterance": "What was the dollar to rupee rate in 2020?",
+    "expect": "new",
+    "ok": true,
+    "shown": "learns a new skill"
+  }
+]

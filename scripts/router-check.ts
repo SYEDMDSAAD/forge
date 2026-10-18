@@ -62,6 +62,7 @@ const FEW: typeof CASES = [
   ["Where is the ISS right now?", null, {}],
   ["Convert 100 US dollars to rupees", null, {}],
   ["What time is sunset in Jaipur today?", null, {}],
+  ["Will it rain in Mumbai tomorrow?", null, {}],
   ["How hot is it in Chennai?", "get_current_weather", { city: "Chennai" }],
   ["Is it windy in Kolkata?", "get_current_weather", { city: "Kolkata" }],
 ];

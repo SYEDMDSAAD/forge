@@ -11,14 +11,14 @@ import { ForgeFailed, testSpec, type SmithResult } from "./smith.js";
 import type { ForgeEvent, TestReport, ToolSpec } from "./types.js";
 import { fixApostrophes, syntaxError, validateSpec } from "./validate.js";
 
-interface Plan {
+export interface Plan {
   feasible: boolean;
   reason: string;
   source: string;
   name: string;
   title: string;
   description: string;
-  inputs: { name: string; type: "string" | "number"; description: string; example: string; optional?: boolean }[];
+  inputs: { name: string; type: "string" | "number"; description: string; example: string; another_example?: string; optional?: boolean }[];
 }
 
 const PLAN_SCHEMA = {
@@ -39,8 +39,9 @@ const PLAN_SCHEMA = {
           type: { type: "string", enum: ["string", "number"] },
           description: { type: "string" },
           example: { type: "string" },
+          another_example: { type: "string" },
         },
-        required: ["name", "type", "description", "example"],
+        required: ["name", "type", "description", "example", "another_example"],
       },
     },
   },
@@ -165,7 +166,11 @@ function toSnake(s: string): string {
   return /^[a-z][a-z0-9_]{2,}$/.test(out) ? out : `skill_${out || "custom"}`.slice(0, 48);
 }
 
-function buildSpec(request: string, plan: Plan, src: Source, code: string): ToolSpec {
+// A currency code fixed in the code is often said as its name ("dollars").
+const CURRENCY_NAMES: Record<string, string> = { usd: "dollar", inr: "rupee", eur: "euro", gbp: "pound", jpy: "yen", aed: "dirham" };
+const spoken = (v: string) => [v.toLowerCase(), ...(CURRENCY_NAMES[v.toLowerCase()] ? [CURRENCY_NAMES[v.toLowerCase()]] : [])];
+
+export function buildSpec(request: string, plan: Plan, src: Source, code: string): ToolSpec {
   const properties: Record<string, unknown> = {};
   const input: Record<string, unknown> = {};
   const required: string[] = [];
@@ -175,6 +180,23 @@ function buildSpec(request: string, plan: Plan, src: Source, code: string): Tool
     if (!i.optional) required.push(key);
     if (!i.optional || i.example.trim()) input[key] = i.type === "number" ? Number(i.example) : i.example;
   }
+  const tests: ToolSpec["tests"] = [{ name: "example", input, assert: speechAssert(request), ...(src.reference ? { reference: src.reference } : {}) }];
+  // The same skill with different values: an answer that still names the first
+  // ones (a word, a coin, a city) has them fixed in its code.
+  const other: Record<string, unknown> = { ...input };
+  for (const i of plan.inputs) {
+    const another = i.another_example?.trim();
+    if (i.type === "string" && another && another.toLowerCase() !== String(input[toSnake(i.name)] ?? "").toLowerCase()) other[toSnake(i.name)] = another;
+  }
+  const others = Object.values(other).map((v) => String(v).toLowerCase());
+  const fixed = Object.entries(input).filter(([k, v]) => typeof v === "string" && v.trim().length >= 3 && other[k] !== v && !others.some((o) => o.includes(v.toLowerCase())));
+  if (Object.keys(other).some((k) => other[k] !== input[k]))
+    tests.push({
+      name: "another input",
+      input: other,
+      assert: [speechAssert(request), ...fixed.flatMap(([, v]) => spoken(String(v))).map((w) => `!result.speech.toLowerCase().includes(${JSON.stringify(w)})`)].join(" && "),
+      ...(src.reference ? { reference: src.reference } : {}),
+    });
   const description = plan.description.length >= 20 ? plan.description : `${plan.description || plan.title}. Use for ${src.useFor}.`;
   return {
     name: toSnake(plan.name),
@@ -183,17 +205,22 @@ function buildSpec(request: string, plan: Plan, src: Source, code: string): Tool
     inputSchema: { type: "object", properties, required },
     code,
     allowedDomains: src.domains,
-    tests: [{ name: "example", input, assert: speechAssert(request), ...(src.reference ? { reference: src.reference } : {}) }],
+    tests,
     sources: [src.name],
   };
 }
 
-function describeFailure(report: TestReport, request: string): string {
+function describeFailure(report: TestReport, request: string, spec: ToolSpec): string {
   return report.results
     .filter((r) => !r.passed)
     .map((r) => {
+      const test = spec.tests.find((t) => t.name === r.name);
       const problems = r.result !== undefined && r.error?.startsWith("Assertion") ? speechProblems(r.result, request) : [];
-      const why = problems.length ? problems.map((p) => `- ${p}`).join("\n") : (r.error ?? "failed");
+      if (!problems.length && r.name === "another input" && r.error?.startsWith("Assertion")) {
+        const first = Object.values(spec.tests[0].input).filter((v) => typeof v === "string");
+        problems.push(`with the input ${JSON.stringify(test?.input)} the answer still mentions ${first.map((v) => JSON.stringify(v)).join(" or ")} from the first example: the code has a value fixed in it; use the input instead`);
+      }
+      const why = `Test with input ${JSON.stringify(test?.input ?? {})}:\n${problems.length ? problems.map((p) => `- ${p}`).join("\n") : (r.error ?? "failed")}`;
       return `${why}${r.result !== undefined ? `\nIt returned: ${JSON.stringify(r.result).slice(0, 600)}` : ""}`;
     })
     .concat(report.logs ? [`console output: ${report.logs.slice(0, 600)}`] : [])
@@ -205,6 +232,9 @@ function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent:
   const r = report.results[0];
   const speech = (r?.result as { speech?: string } | undefined)?.speech;
   if (speech) onEvent({ stage: "test", message: `Test ${JSON.stringify(spec.tests[0].input)} answered: "${speech.slice(0, 160)}"` });
+  const r2 = report.results[1];
+  const speech2 = (r2?.result as { speech?: string } | undefined)?.speech;
+  if (speech2 && spec.tests[1]) onEvent({ stage: "test", message: `Second test ${JSON.stringify(spec.tests[1].input)}, to check nothing is fixed in the code, answered: "${speech2.slice(0, 120)}"` });
   const c = r?.crossCheck;
   if (typeof c?.said === "string") onEvent({ stage: "test", message: `Cross-check: the answer names "${c.said}", listed by ${source} in the response it read` });
   else if (c?.source !== undefined) onEvent({ stage: "test", message: `Cross-check: the answer says ${c.said}, ${source} says ${c.source}${r.passed ? ", a match" : ""}` });
@@ -213,19 +243,22 @@ function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent:
 
 /** Turns the plan into the source's one general skill, keeping the user's topic as the test example. */
 async function generalTool(request: string, plan: Plan, tool: NonNullable<Source["tool"]>) {
-  const { value } = await ask<{ value: string }>(
-    "You extract search keywords from a request.",
-    `The user asked: "${request}"\n\nWhat is ${tool.input.name}? (${tool.input.description}). Reply with a few keywords${tool.input.optional ? ", or an empty string if the user didn't name one" : ""}.`,
-    { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+  const values = await ask<Record<string, string>>(
+    "You extract the values a request names.",
+    `The user asked: "${request}"\n\nFor each field give the value from the request${tool.inputs.some((i) => i.optional) ? ", or an empty string when the user didn't name it" : ""}:\n${tool.inputs.map((i) => `- ${i.name}: ${i.description}`).join("\n")}`,
+    { type: "object", properties: Object.fromEntries(tool.inputs.map((i) => [i.name, { type: "string" }])), required: tool.inputs.map((i) => i.name) },
     0,
   );
-  const given = plan.inputs.find((i) => i.type === "string" && i.example.trim())?.example;
-  const example = value.trim() || (tool.input.optional ? "" : (given ?? request));
   Object.assign(plan, {
     name: tool.name,
     title: tool.title,
     description: tool.description,
-    inputs: [{ name: tool.input.name, type: "string", description: tool.input.description, example, optional: tool.input.optional }],
+    inputs: tool.inputs.map((i) => {
+      const said = values[i.name]?.trim() ?? "";
+      const example = i.type === "number" ? String(Number(said.replace(/[^0-9.]/g, "")) || 1) : said || (i.optional ? "" : request);
+      const another = i.another.find((a) => a.toLowerCase() !== example.toLowerCase());
+      return { name: i.name, type: i.type ?? "string", description: i.description, example, another_example: another, optional: i.optional };
+    }),
   });
 }
 
@@ -239,7 +272,7 @@ Available public data sources:
 ${catalogMenu()}
 
 Pick the one source that can answer this. If none can (or it needs a login, payment, private data or a physical action), set feasible=false, source="none", and make reason one friendly sentence to the user explaining that you can't do it and why.
-Otherwise design a reusable tool: a snake_case verb name (like get_air_quality), a short title, a description saying exactly when to use it, and its inputs. Make inputs general (e.g. city), with the user's own values as examples. Use no inputs if none are needed.`,
+Otherwise design a reusable tool: a snake_case verb name (like get_air_quality), a short title, a description saying exactly when to use it, and its inputs. Make inputs general (e.g. city), with the user's own values as examples, and for each a different realistic another_example (e.g. another city). Every value the user named that could change between questions (a city, a word, a coin, a currency) must be an input, never fixed in the code. Use no inputs if none are needed.`,
     PLAN_SCHEMA,
   );
 
@@ -309,8 +342,8 @@ ${evidence}`;
         ));
         continue;
       }
-      failure = `The live test with input ${JSON.stringify(spec.tests[0].input)} failed:\n${describeFailure(report, request)}`;
-      onEvent({ stage: "repair", message: `Test failed: ${failure.split("\n")[1]?.slice(0, 80) ?? "fixing"}` });
+      failure = `The live test failed:\n${describeFailure(report, request, spec)}`;
+      onEvent({ stage: "repair", message: `Test failed: ${failure.split("\n")[2]?.replace(/^- /, "").slice(0, 80) ?? "fixing"}` });
     }
     if (attempt === config.maxSubmissions) break;
     // Small models tend to re-emit their own broken code, so every other retry
