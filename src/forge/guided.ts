@@ -209,6 +209,27 @@ function tellResult(spec: ToolSpec, report: TestReport, source: string, onEvent:
   else if (c?.skipped) onEvent({ stage: "test", message: `Cross-check skipped: ${c.skipped}` });
 }
 
+/** Turns the plan into the source's one general skill, keeping the user's topic as the test example. */
+async function generalTool(request: string, plan: Plan, tool: NonNullable<Source["tool"]>) {
+  const given = plan.inputs.find((i) => i.type === "string" && i.example.trim());
+  const example =
+    given?.example ??
+    (
+      await ask<{ topic: string }>(
+        "You extract search keywords.",
+        `The user asked: "${request}"\n\nGive the topic as a few search keywords (${tool.input.description}).`,
+        { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] },
+        0,
+      )
+    ).topic;
+  Object.assign(plan, {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    inputs: [{ name: tool.input.name, type: "string", description: tool.input.description, example }],
+  });
+}
+
 export async function guidedForge(request: string, onEvent: (e: ForgeEvent) => void): Promise<SmithResult> {
   onEvent({ stage: "thinking", message: "Choosing a data source" });
   const plan = await ask<Plan>(
@@ -225,6 +246,7 @@ Otherwise design a reusable tool: a snake_case verb name (like get_air_quality),
 
   const src = catalogById.get(plan.source);
   if (!plan.feasible || !src) throw new ForgeFailed(plan.reason || "I can't find a public source for that yet.");
+  if (src.tool) await generalTool(request, plan, src.tool);
 
   const inputs = plan.inputs.map((i) => `${toSnake(i.name)}: ${i.type}`).join(", ");
   onEvent({ stage: "thinking", message: `Chose ${src.name}, a verified source for ${src.useFor}` });

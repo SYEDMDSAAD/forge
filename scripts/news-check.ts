@@ -13,8 +13,8 @@ const check = (ok: boolean, what: string) => {
 const reference = catalogById.get("news")!.reference!;
 const feed = JSON.stringify("https://news.google.com/rss/search?q=india+when:7d&hl=en-IN&gl=IN&ceid=IN:en");
 
-async function test(code: string) {
-  const out = await runInSandbox({ mode: "test", code, allowedDomains: ["news.google.com"], tests: [{ name: "t", input: {}, assert: "true", reference }] });
+async function test(code: string, input: Record<string, unknown> = {}) {
+  const out = await runInSandbox({ mode: "test", code, allowedDomains: ["news.google.com"], tests: [{ name: "t", input, assert: "true", reference }] });
   return (out as { results?: { passed: boolean; error?: string }[] }).results?.[0];
 }
 
@@ -36,6 +36,13 @@ try {
   return { speech: "India has had a very busy week of news, with many important stories." };
 }`);
   check(noFeed?.passed === false && /never read the news feed/.test(noFeed.error ?? ""), "a skill that never reads the feed is rejected");
+
+  const fixedTopic = await test(`export default async function run({ topic }) {
+  const xml = await (await fetch(${feed})).text();
+  const titles = xml.split("<item>").slice(1, 3).map((it) => it.split("<title>")[1].split("</title>")[0]);
+  return { speech: "Latest news on " + topic + ": " + titles.join("; ") + "." };
+}`, { topic: "rocket launch" });
+  check(fixedTopic?.passed === false && /instead of its topic/.test(fixedTopic.error ?? ""), "a skill that ignores its topic and reads a fixed feed is rejected");
 } finally {
   shutdownSandbox();
 }

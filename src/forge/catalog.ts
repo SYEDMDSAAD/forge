@@ -23,6 +23,12 @@ export interface Source {
   domains: string[];
   endpoints: Endpoint[];
   notes?: string;
+  /**
+   * For a source that answers any topic (news), the one general skill it makes,
+   * so a skill learned for one question never answers a different one with a
+   * fixed topic, and later questions reuse it.
+   */
+  tool?: { name: string; title: string; description: string; input: { name: string; description: string } };
 }
 
 // Reference checks. They can't know the input names a model chose, so they read
@@ -105,6 +111,9 @@ const NEWS_REFERENCE: Reference = {
     if (!words.length) throw new Error("Cross-check failed: the skill never read the news feed, so its answer can't come from it. Fetch the feed and say its titles.");
     url = "https://news.google.com/rss/search?q=" + words.map(encodeURIComponent).join("+") + "+when:7d&hl=en-IN&gl=IN&ceid=IN:en";
   }
+  const topic = Object.values(input).filter((v) => typeof v === "string").join(" ").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+  const asked = decodeURIComponent(url.split("q=")[1]?.split("&")[0] ?? "").toLowerCase();
+  if (topic.length && !topic.some((w) => asked.includes(w))) throw new Error("Cross-check failed: the skill searched for '" + asked + "' instead of its topic input. Build the query from the input.");
   const xml = await (await fetch(url)).text();
   return xml.split("<item>").slice(1, 30).map((it) => (it.split("<title>")[1] ?? "").split("</title>")[0]);
 }`,
@@ -226,6 +235,12 @@ export const CATALOG: Source[] = [
     name: "Google News",
     useFor: "latest news headlines about any person, company, product, event or topic (what happened, what was launched or announced, recent news); the topic is the tool's input",
     domains: ["news.google.com"],
+    tool: {
+      name: "get_news",
+      title: "Latest News",
+      description: "Latest news headlines on any topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.",
+      input: { name: "topic", description: "the news topic in a few keywords, e.g. rocket launch or India cricket" },
+    },
     endpoints: [
       {
         url: "https://news.google.com/rss/search?q={query}+when:7d&hl=en-IN&gl=IN&ceid=IN:en",

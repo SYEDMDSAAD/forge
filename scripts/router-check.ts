@@ -79,6 +79,14 @@ const FEW_CURRENCY: typeof CASES = [
   ["How much is one ethereum worth in dollars?", null, {}],
   ["Convert 50 euros to rupees", "convert_currency", { amount: 50, from_currency: "EUR", to_currency: "INR" }],
 ];
+const ONLY_NEWS = [
+  { ...skill("get_news", "Latest news headlines on any topic: a person, company, product, launch, event or place. Use for what happened recently or the latest news about something.", { topic: str("the news topic in a few keywords, e.g. rocket launch or India cricket") }), request: "What car model has Elon Musk launched recently?" },
+];
+const FEW_NEWS: typeof CASES = [
+  ["When is the next rocket launch?", null, {}],
+  ["What's the latest news about ISRO?", "get_news", {}],
+  ["Any news on the India cricket team?", "get_news", {}],
+];
 
 const norm = (v: unknown) => String(v).toLowerCase().trim();
 let passed = 0;
@@ -87,6 +95,7 @@ const runs: [string, RouteSkill[], typeof CASES][] = [
   ["11 skills", SKILLS, CASES],
   ["only a weather skill", ONLY_WEATHER, FEW],
   ["only a currency skill", ONLY_CURRENCY, FEW_CURRENCY],
+  ["only a news skill", ONLY_NEWS, FEW_NEWS],
 ];
 for (const [label, skills, cases] of runs) {
 console.log(`\n${label}:`);
@@ -106,6 +115,6 @@ for (const [utterance, want, inputs, missing = []] of cases) {
   console.log(`${problems.length ? "FAIL" : "PASS"} ${utterance} -> ${shown} (${r.ms} ms)${problems.length ? `  [want ${want ?? "none"}: ${problems.join(", ")}]` : ""}`);
 }
 }
-const count = CASES.length + FEW.length + FEW_CURRENCY.length;
+const count = CASES.length + FEW.length + FEW_CURRENCY.length + FEW_NEWS.length;
 console.log(`\n${passed}/${count} routed correctly, ${Math.round(total / count)} ms on average`);
 process.exit(passed === count ? 0 : 1);

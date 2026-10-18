@@ -1,0 +1,41 @@
+{
+  "smith": "guided",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "runs": 1,
+  "rows": [
+    {
+      "run": 1,
+      "request": "What car model has Elon Musk launched recently?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 68.089,
+      "attempts": 2,
+      "skill": "get_news",
+      "speech": "Latest news on Elon Musk car launch: Watch: Elon Musk's 'flying Tesla' takes off, flips mid-air and lands safely in demo - The Times of India; Watch: Did Tesla really just unveil a flying car? - BBC; Elon Musk unveils Tesla's 'flying' car - Phys.org."
+    },
+    {
+      "run": 1,
+      "request": "What is the latest news about ISRO?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 40.136,
+      "attempts": 1,
+      "skill": "get_news",
+      "speech": "Latest news on ISRO: Development of LOX-Methane engine in ISRO - ISRO; TRISHNA satellite is in advanced stage of realisation, says ISRO official - The Hindu; Strengthening India’s Space Sovereignty - Press Information Bureau."
+    },
+    {
+      "run": 1,
+      "request": "Any news on the India cricket team today?",
+      "expect": "build",
+      "outcome": "built",
+      "asExpected": true,
+      "seconds": 62.541,
+      "attempts": 2,
+      "skill": "get_news",
+      "speech": "Latest cricket news on India cricket: IND-W vs ZIM-W T20 2026: Smriti Mandhana era begins as India host Zimbabwe - schedule, where to watch live - Olympics; Carlton Mid One-Day International Tri-Series, 2014/15 - India Cricket Team Records and Stats - Cricinfo; Star pacer returns in India Test squad for New Zealand - ICC."
+    }
+  ]
+}
