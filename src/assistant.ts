@@ -236,7 +236,9 @@ const ELLIPTICAL = /^\s*(and|what about|how about|what of|same for|and for|now)\
  */
 export async function standalone(utterance: string, previous?: string): Promise<string> {
   if (!previous || config.provider === "mock" || !ELLIPTICAL.test(utterance)) return utterance;
-  const prompt = `Previous question: "${previous}"\nFollow-up: "${utterance}"\n\nRewrite the follow-up as one complete question that makes sense on its own. The follow-up replaces one thing in the previous question (a place, an agency, a currency, an item); it does not add to it. Keep everything else the same.`;
+  // A leading "and" reads to a small model as "both": "and in London?" became "Tokyo and London".
+  const follow = utterance.replace(/^\s*(and|now)\s+/i, "");
+  const prompt = `Previous question: "${previous}"\nFollow-up: "${follow}"\n\nRewrite the follow-up as one complete question that makes sense on its own. The follow-up replaces one thing in the previous question (a place, an agency, a currency, an item): the old one is dropped, never kept alongside the new one. Keep everything else the same.\nExamples:\n"What's the weather in Pune right now?" + "in Delhi?" = "What's the weather in Delhi right now?"\n"Convert 100 dollars to rupees" + "to euros?" = "Convert 100 dollars to euros"\n"What are the next public holidays in Japan?" + "what about France?" = "What are the next public holidays in France?"`;
   if (config.provider !== "ollama") {
     const res = await createClient().messages.create({ model: routerModel, max_tokens: 100, system: "Reply with only the rewritten question.", messages: [{ role: "user", content: prompt }] });
     return res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim() || utterance;

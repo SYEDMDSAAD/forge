@@ -47,6 +47,10 @@ const client = new Client({ name: "forge-web", version: "0.1.0" }, { capabilitie
 let tools: Tool[] = [];
 let skills: Skill[] = [];
 let busy = false;
+/** Questions asked while the last one is still being answered: answered next, in order, never dropped. */
+const queued: string[] = [];
+/** Questions that need a new skill while another is being learned: asked again when it's done. */
+const afterBuild: string[] = [];
 
 // ---------- what the assistant is doing ----------
 // The orb (also the mic button) shows it: listening, speaking, thinking or idle.
@@ -262,6 +266,20 @@ async function presentAnswer(skill: Skill, speech: string, data: unknown, footer
  * A follow-up about the last answer that no skill fits ("could this launch be delayed?"),
  * answered from that answer and general knowledge. Null when it needs live data.
  */
+/** Code shown as a formatted block with a Copy button (never read aloud). */
+function codeBlock(code: string) {
+  const pre = el("pre", "code answer-code");
+  pre.append(el("code", undefined, code));
+  const copy = el("button", "copy", "Copy");
+  copy.type = "button";
+  copy.onclick = () => {
+    void navigator.clipboard?.writeText(code).then(() => (copy.textContent = "Copied"));
+  };
+  const wrap = el("div", "code-wrap");
+  wrap.append(pre, copy);
+  return wrap;
+}
+
 async function followUp(utterance: string): Promise<boolean> {
   if (!last) return false;
   const r: { speech: string | null; code?: string; by?: string; ms?: number } = await fetch("/assistant/followup", {
@@ -274,18 +292,7 @@ async function followUp(utterance: string): Promise<boolean> {
   if (!r.speech) return false;
   const card = el("div", "card answer follow");
   card.append(el("div", "card-kicker", "Follow-up"), el("div", "card-title", r.speech));
-  if (r.code) {
-    const pre = el("pre", "code answer-code");
-    pre.append(el("code", undefined, r.code));
-    const copy = el("button", "copy", "Copy");
-    copy.type = "button";
-    copy.onclick = () => {
-      void navigator.clipboard?.writeText(r.code!).then(() => (copy.textContent = "Copied"));
-    };
-    const wrap = el("div", "code-wrap");
-    wrap.append(pre, copy);
-    card.append(wrap);
-  }
+  if (r.code) card.append(codeBlock(r.code));
   const cite = el("div", "cite");
   cite.append(el("span", "tag src", "From my last answer + general knowledge"), el("span", "tag warn", "Not live data · not cross-checked"));
   card.append(cite, el("div", "via", `${r.by} answered in ${took(r.ms ?? 0)}; it may only repeat numbers from the last answer, so anything current needs a skill`));
@@ -754,7 +761,7 @@ async function learn(utterance: string): Promise<{ skill?: Skill; answered: bool
   const sc = result?.structuredContent as { status?: string; reason?: string; capability?: Skill; answer?: FirstAnswer } | undefined;
   const answered = Boolean(sc?.answer);
   if (sc?.status === "installed") {
-    buildEnd(true, answered ? `Answered, and kept ${sc.capability?.name ?? "the skill"} for next time` : `Installed ${sc.capability?.name ?? "the skill"}`);
+    buildEnd(true, answered ? `Answered, and kept “${sc.capability?.title ?? sc.capability?.name ?? "the skill"}” for next time` : `Installed “${sc.capability?.title ?? sc.capability?.name ?? "the skill"}”`);
     await refresh(sc.capability?.name);
     if (answered) say("Kept. Next time it's instant.");
     return { skill: skills.find((s) => s.name === sc.capability?.name), answered };
@@ -779,6 +786,9 @@ async function learnThenAnswer(utterance: string) {
     building = false;
     say("Sorry, something went wrong while I was learning that.");
     addMsg("note", e instanceof Error ? e.message : String(e));
+  } finally {
+    const next = afterBuild.shift();
+    if (next) void ask(next, true);
   }
 }
 
@@ -842,7 +852,7 @@ function cannotCard(speech: string) {
 
 /** Chat and creative writing: the model's own words, labelled, with nothing to check. */
 async function chatReply(utterance: string, type: "chat" | "creative") {
-  const r: { speech?: string | null; by?: string; ms?: number } = await fetch("/assistant/chat", {
+  const r: { speech?: string | null; code?: string; by?: string; ms?: number } = await fetch("/assistant/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ utterance, type }),
@@ -853,6 +863,7 @@ async function chatReply(utterance: string, type: "chat" | "creative") {
   if (type === "chat") return say(r.speech);
   const card = el("div", "card answer creative");
   card.append(el("div", "card-kicker", "Written for you"), el("div", "card-title", r.speech));
+  if (r.code) card.append(codeBlock(r.code));
   const cite = el("div", "cite");
   cite.append(el("span", "tag warn", "Written by the model · not checked"));
   card.append(cite, el("div", "via", `${r.by} wrote it in ${took(r.ms ?? 0)}`));
@@ -862,15 +873,23 @@ async function chatReply(utterance: string, type: "chat" | "creative") {
 
 // A spoken "yes, keep it" or "not now" answers the open "Keep this skill?" card.
 let pendingConsent: ((keep: boolean) => void) | undefined;
+// "Is that safe?", "what does it mean?": about the last answer. "Convert 5 km to miles" stands on its own: a skill's job.
+const REFERS = /\b(that|this|it|its|it's|these|those|them|they|there|he|she|his|her)\b/i;
+const SOCIAL = /^\s*(hi|hello|hey|hiya|thanks|thank you|thank u|thx|bye|goodbye|good (morning|afternoon|evening|night)|you('re| are) (awesome|great|amazing|the best)|how are you)\b/i;
 const YES = /^(yes|yeah|yep|sure|ok(ay)?|keep( it)?|please do|do it)\b/i;
 const NO = /^(no|nope|not now|skip( it)?|don'?t|no thanks|discard)\b/i;
 
-async function ask(utterance: string) {
-  if (busy || !utterance.trim()) return;
+async function ask(utterance: string, shown = false) {
+  if (!utterance.trim()) return;
+  if (busy) {
+    if (!shown) addMsg("user", utterance);
+    queued.push(utterance);
+    return;
+  }
   $("app").classList.remove("left-open");
   $("scrim").hidden = !$("app").classList.contains("right-open");
   if (pendingConsent && (YES.test(utterance.trim()) || NO.test(utterance.trim()))) {
-    addMsg("user", utterance);
+    if (!shown) addMsg("user", utterance);
     pendingConsent(YES.test(utterance.trim()));
     return;
   }
@@ -878,7 +897,7 @@ async function ask(utterance: string) {
   state.thinking = true;
   showState();
   stopSpeaking();
-  addMsg("user", utterance);
+  if (!shown) addMsg("user", utterance);
   const doneTyping = typing();
   try {
     // 1. What kind of question: emergencies first, then whether it needs a skill at all.
@@ -889,7 +908,8 @@ async function ask(utterance: string) {
     if (sorted.type === "personal" && sorted.speech) return cannotCard(sorted.speech);
     if (sorted.type === "chat" || sorted.type === "creative") {
       // "Show me that as code", "is that safe?": about the last answer, not new chat.
-      if (last && (await followUp(asked))) return;
+      // Thanks and greetings are just chat, never about the last answer.
+      if (last && !SOCIAL.test(asked) && (await followUp(asked))) return;
       return await chatReply(asked, sorted.type);
     }
     // 2. A skill's job: live data, knowledge, a fact, a calculation (or advice, from knowledge).
@@ -900,9 +920,13 @@ async function ask(utterance: string) {
     if (routed) {
       lastQuestion = asked;
       await useSkill(routed);
-    } else if (await followUp(asked)) {
+    } else if (REFERS.test(asked) && (await followUp(asked))) {
       // answered from the last answer; nothing to learn
-    } else if (building) say("I'm still learning the last thing you asked. Ask me this again in a minute.");
+    } else if (building) {
+      // One skill is learned at a time; this one waits its turn (the new skill may even answer it).
+      afterBuild.push(asked);
+      say("I'll get to that as soon as I've finished learning the last thing you asked.");
+    }
     // Learning runs in the background, so the conversation can go on meanwhile.
     else {
       lastQuestion = asked;
@@ -916,6 +940,8 @@ async function ask(utterance: string) {
     busy = false;
     state.thinking = false;
     showState();
+    const next = queued.shift();
+    if (next) void ask(next, true);
   }
 }
 

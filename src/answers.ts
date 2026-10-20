@@ -23,13 +23,20 @@ export interface Sorted {
 const TYPES: Record<QuestionType, string> = {
   live: "needs today's or right-now data: weather, air quality, news, prices, exchange rates, rocket launches, earthquakes, where the ISS is, public holidays",
   knowledge: "explaining something that doesn't change from day to day: what or who something is, how or why it works, history, science, technology, programming, the difference between two things, the meaning of a word",
-  fact: "one exact value about a place, person or thing: a population, capital, height, area, founding date, birth date, currency, official language, a leader",
+  fact: "one exact value about a place, person, company or thing: a population, capital, height, area, founding date, birth date, currency, official language, who currently leads or heads it (a president, prime minister, CEO), its founder or headquarters",
   calculation: "arithmetic, percentages, converting units (km to miles, Celsius to Fahrenheit), how many days until a date, what time it is in a city; not money (currency conversion and prices use live rates)",
-  creative: "writing something new: a poem, a story, a joke, a wish or message, a name idea, a short speech",
+  creative: "writing something new: a poem, a story, a joke, a wish or message, a name idea, a short speech, a piece of code (a function, program or query)",
   chat: "greetings, thanks, small talk, or questions about the assistant itself",
   advice: "a health, medical, legal or money question about what the user should do: symptoms, medicines, a dispute, investing, taxes",
   personal: "needs the user's own accounts or private data, or an action in the world: their email, messages, calendar, bank, orders, contacts, booking or buying something, controlling devices",
 };
+
+// "Who is the CEO of Amazon?", "who founded ISRO?": one current value on Wikidata, which the
+// small model often sorts as knowledge (then answered from the article, which may be out of date).
+const LEADER = /^\s*(who('s| is| was)( the)? (current |present )?(ceo|chief executive|president|prime minister|chief minister|governor|head|leader|founder|co-?founder|chairman|chairperson)s? of |who (founded|started|created) )/i;
+
+// "Write a Python function to reverse a string": code to write, not an article to explain.
+const WRITE_CODE = /^\s*(please |can you |could you )?(write|give me|show me|create|make|generate)\b.{0,40}\b(code|function|program|script|snippet|class|query|regex|algorithm)\b/i;
 
 /** One quick, schema-constrained call: what kind of question this is. */
 export async function sortQuestion(utterance: string): Promise<Sorted | undefined> {
@@ -48,7 +55,7 @@ export async function sortQuestion(utterance: string): Promise<Sorted | undefine
     config.provider === "ollama"
       ? await askOllama<{ type: QuestionType; advice: string }>(system, `Request: "${utterance}"\n\nWhich type is it? For advice, which area?`, schema, 0)
       : await claudeJson<{ type: QuestionType; advice: string }>(system, `Request: "${utterance}"\n\nWhich type is it, and for advice which area? Reply with JSON {"type": ..., "advice": "none"|"medical"|"legal"|"financial"}.`);
-  const type = r.type in TYPES ? r.type : "knowledge";
+  const type = LEADER.test(utterance) ? "fact" : WRITE_CODE.test(utterance) ? "creative" : r.type in TYPES ? r.type : "knowledge";
   const advice = type === "advice" && ["medical", "legal", "financial"].includes(r.advice) ? (r.advice as AdviceArea) : undefined;
   return { type, ...(advice ? { advice } : {}), by: routerModel, ms: Math.round(performance.now() - t0) };
 }
@@ -87,9 +94,26 @@ function happeningNow(utterance: string): boolean {
 // ---------- replies that need no skill ----------
 
 /** Chat and creative writing: the model's own words, labelled as such by the page. */
-export async function chatAnswer(utterance: string, type: "chat" | "creative"): Promise<{ speech: string; by: string; ms: number } | undefined> {
+export async function chatAnswer(utterance: string, type: "chat" | "creative"): Promise<{ speech: string; code?: string; by: string; ms: number } | undefined> {
   if (config.provider === "mock") return undefined;
   const t0 = performance.now();
+  if (type === "creative" && WRITE_CODE.test(utterance)) {
+    // Code is shown on screen, never read aloud: one short spoken sentence introduces it.
+    const system = "You are a friendly voice assistant who writes code. Write the code the user asks for, short, correct and laid out on separate lines with indentation, with brief comments; and one short spoken sentence introducing it (no code in the sentence).";
+    let speech = "";
+    let code = "";
+    if (config.provider === "ollama") {
+      const r = await askOllama<{ speech: string; code: string }>(system, utterance, { type: "object", properties: { speech: { type: "string" }, code: { type: "string" } }, required: ["speech", "code"] }, 0.2);
+      speech = tidy(r.speech ?? "");
+      code = (r.code ?? "").trim();
+    } else {
+      const res = await createClient().messages.create({ model: routerModel, max_tokens: 800, system: system + " Put the code in one fenced code block after the sentence.", messages: [{ role: "user", content: utterance }] });
+      const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+      code = text.match(/```[a-z+]*\n([^]*?)```/)?.[1]?.trim() ?? "";
+      speech = tidy(text.replace(/```[^]*?```/g, ""));
+    }
+    if (speech && code) return { speech, code, by: routerModel, ms: Math.round(performance.now() - t0) };
+  }
   const system =
     type === "creative"
       ? "You are a warm, friendly voice assistant. Write what the user asks for, kept short enough to read aloud (under 120 words), in plain text with no markdown; a poem keeps its line breaks. Never state facts about current events, prices or real people's private lives."

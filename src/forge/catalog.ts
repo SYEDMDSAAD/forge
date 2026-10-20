@@ -45,7 +45,7 @@ export interface Source {
     /** generic: words like "today's hot news" mean no topic at all (the source's default, e.g. top headlines). */
     /** wholeRequest: the user's question itself, word for word (to find the passage that answers it). */
     /** known: values to take straight from the request when the model leaves the field empty (NASA, bitcoin). */
-    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; generic?: boolean; wholeRequest?: boolean; known?: string[]; another: string[] }[];
+    inputs: { name: string; type?: "number"; description: string; optional?: boolean; fromRequest?: boolean; generic?: boolean; wholeRequest?: boolean; known?: string[]; said?: boolean; another: string[] }[];
   };
 }
 
@@ -185,7 +185,7 @@ const EARTHQUAKE_REFERENCE: Reference = {
 
 // Wikidata: the same entity and property, read by Forge itself. Names (a capital) must be said,
 // numbers (a population) must match, dates are compared by their year and day.
-const WIKIDATA_PROPS = `{ population: "P1082", capital: "P36", area: "P2046", elevation: "P2044", height: "P2048", length: "P2043", founded: "P571", born: "P569", died: "P570", currency: "P38", language: "P37", "head of state": "P35", "head of government": "P6", country: "P17", author: "P50", director: "P57", inventor: "P61", "highest point": "P610" }`;
+const WIKIDATA_PROPS = `{ population: "P1082", capital: "P36", area: "P2046", elevation: "P2044", height: "P2048", length: "P2043", founded: "P571", born: "P569", died: "P570", currency: "P38", language: "P37", "head of state": "P35", "head of government": "P6", country: "P17", author: "P50", director: "P57", inventor: "P61", "highest point": "P610", ceo: "P169", founder: "P112", headquarters: "P159" }`;
 const WIKIDATA_REFERENCE: Reference = {
   code: `const PROPS = ${WIKIDATA_PROPS};
 export default async function (input) {
@@ -194,7 +194,8 @@ export default async function (input) {
   if (!pid || !entity) return [];
   const s = await (await fetch("https://www.wikidata.org/w/api.php?action=wbsearchentities&language=en&format=json&limit=1&search=" + encodeURIComponent(entity))).json();
   if (!s.search?.length) return [];
-  const q = "SELECT ?v ?vLabel WHERE { wd:" + s.search[0].id + " wdt:" + pid + " ?v . SERVICE wikibase:label { bd:serviceParam wikibase:language 'en'. } }";
+  const id = s.search[0].id;
+  const q = "SELECT ?v ?vLabel WHERE { wd:" + id + " wdt:" + pid + " ?v . FILTER NOT EXISTS { wd:" + id + " p:" + pid + " ?st . ?st ps:" + pid + " ?v ; pq:P582 ?end . } SERVICE wikibase:label { bd:serviceParam wikibase:language 'en'. } }";
   const r = await (await fetch("https://query.wikidata.org/sparql?format=json&query=" + encodeURIComponent(q))).json();
   const values = r.results.bindings.map((b) => b.vLabel.value);
   const out = [];
@@ -315,7 +316,7 @@ export const CATALOG: Source[] = [
       description: "The weather in a city: right now (temperature, sky, humidity, wind) with today's high, rain chance, sunrise and sunset; or the forecast for tomorrow or the day after.",
       inputs: [
         { name: "city", fromRequest: true, description: "the city, e.g. Pune", another: ["Mumbai", "London"] },
-        { name: "day", description: "today, tomorrow or day after tomorrow, only when the user asks about a later day; leave out for right now", optional: true, another: ["tomorrow", "today"] },
+        { name: "day", description: "today, tomorrow or day after tomorrow, only when the user asks about a later day; leave out for right now", optional: true, said: true, another: ["tomorrow", "today"] },
       ],
     },
     endpoints: [
@@ -337,11 +338,15 @@ const w = await (await fetch("https://api.open-meteo.com/v1/forecast?latitude=" 
 const sky = (c) => (c === 0 ? "clear" : c <= 3 ? "partly cloudy" : c <= 48 ? "foggy" : c <= 67 ? "rainy" : c <= 77 ? "snowy" : c <= 82 ? "showery" : "stormy");
 const at = (iso) => iso.slice(11, 16);
 const d = w.daily;
-const i = /after/i.test(day || "") ? 2 : /tomorrow/i.test(day || "") ? 1 : 0;
+const when = String(day).toLowerCase();
+const i = when.includes("after") ? 2 : when.includes("tomorrow") ? 1 : 0;
 const speech = i === 0
   ? "In " + place.name + " it's " + Math.round(w.current.temperature_2m) + "°C and " + sky(w.current.weather_code) + " right now, with humidity at " + w.current.relative_humidity_2m + "% and wind at " + Math.round(w.current.wind_speed_10m) + " km/h. Today: a high of " + Math.round(d.temperature_2m_max[0]) + "°C, a " + d.precipitation_probability_max[0] + "% chance of rain, sunrise at " + at(d.sunrise[0]) + " and sunset at " + at(d.sunset[0]) + "."
   : (i === 1 ? "Tomorrow" : "The day after tomorrow") + " in " + place.name + ": a high of " + Math.round(d.temperature_2m_max[i]) + "°C and a low of " + Math.round(d.temperature_2m_min[i]) + "°C, with a " + d.precipitation_probability_max[i] + "% chance of rain. Sunrise at " + at(d.sunrise[i]) + ", sunset at " + at(d.sunset[i]) + ".";
-return { speech, data: { temperature: Math.round(w.current.temperature_2m), humidity: w.current.relative_humidity_2m, wind_speed: Math.round(w.current.wind_speed_10m), rain_chance: d.precipitation_probability_max[i] } };`
+const data = i === 0
+  ? { temperature: Math.round(w.current.temperature_2m), humidity: w.current.relative_humidity_2m, wind_speed: Math.round(w.current.wind_speed_10m), rain_chance: d.precipitation_probability_max[0] }
+  : { high_temp: Math.round(d.temperature_2m_max[i]), low_temp: Math.round(d.temperature_2m_min[i]), rain_chance: d.precipitation_probability_max[i] };
+return { speech, data };`
   },
   {
     id: "air_quality",
@@ -714,17 +719,17 @@ If days is empty, say public holidays for that country aren't available. Speech:
     kind: "fact",
     reference: WIKIDATA_REFERENCE,
     name: "Wikidata",
-    useFor: "one exact fact about a place, person, organisation or thing: population, capital, area, height or elevation, length, founding date, birth or death date, currency, official language, head of state or government, author, director, inventor",
+    useFor: "one exact fact about a place, person, organisation or thing: population, capital, area, height or elevation, length, founding date, birth or death date, currency, official language, head of state or government, CEO, founder, headquarters, author, director, inventor",
     domains: ["www.wikidata.org", "query.wikidata.org"],
     tool: {
       name: "get_fact",
       title: "Look Up a Fact",
-      description: "One exact fact from Wikidata about a place, person, organisation or thing: population, capital, area, elevation, height, length, when it was founded, when someone was born or died, currency, language, head of state or government, author, director, inventor.",
+      description: "One exact fact from Wikidata about a place, person, organisation or thing: population, capital, area, elevation, height, length, when it was founded, when someone was born or died, currency, language, head of state or government, CEO, founder, headquarters, author, director, inventor.",
       inputs: [
         { name: "entity", fromRequest: true, description: "the place, person, organisation or thing, by its name, e.g. Japan or ISRO", another: ["India", "France"] },
         {
           name: "property",
-          description: "exactly one of: population, capital, area, elevation, height, length, founded, born, died, currency, language, head of state, head of government, country, author, director, inventor, highest point",
+          description: "exactly one of: population, capital, area, elevation, height, length, founded, born, died, currency, language, head of state, head of government, ceo, founder, headquarters, country, author, director, inventor, highest point (a president is head of state, a prime minister head of government)",
           another: ["capital", "population"],
         },
       ],
@@ -745,17 +750,19 @@ If days is empty, say public holidays for that country aren't available. Speech:
 const PROPS = ${WIKIDATA_PROPS};
 const UNITS = { area: " square kilometres", elevation: " metres", height: " metres" };
 const pid = PROPS[property.toLowerCase().trim()];
-If !pid, say you can look up population, capital, area, height, founding, birth and death dates, currency, language and leaders.
+If !pid, say you can look up population, capital, area, height, founding, birth and death dates, currency, language, leaders and company heads.
 const s = await (await fetch("https://www.wikidata.org/w/api.php?action=wbsearchentities&language=en&format=json&limit=1&search=" + encodeURIComponent(entity))).json();
 If !s.search.length, say entity wasn't found on Wikidata. const name = s.search[0].label;
-const q = "SELECT ?v ?vLabel WHERE { wd:" + s.search[0].id + " wdt:" + pid + " ?v . SERVICE wikibase:label { bd:serviceParam wikibase:language 'en'. } }";
+const id = s.search[0].id;
+const q = "SELECT ?v ?vLabel WHERE { wd:" + id + " wdt:" + pid + " ?v . FILTER NOT EXISTS { wd:" + id + " p:" + pid + " ?st . ?st ps:" + pid + " ?v ; pq:P582 ?end . } SERVICE wikibase:label { bd:serviceParam wikibase:language 'en'. } }";
 const r = await (await fetch("https://query.wikidata.org/sparql?format=json&query=" + encodeURIComponent(q))).json();
 const values = r.results.bindings.map((b) => b.vLabel.value);
 If values is empty, say Wikidata has no property for name.
 const nice = (v) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/.test(v) ? new Date(v).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }) : /^-?[0-9]+([.][0-9]+)?$/.test(v) ? Number(v).toLocaleString("en-IN") + (UNITS[property] || "") : v;
 const value = values.slice(0, 3).map(nice).join(", ");
 const p = property.toLowerCase().trim();
-const speech = p === "founded" ? name + " was founded on " + value + "." : p === "born" ? name + " was born on " + value + "." : p === "died" ? name + " died on " + value + "." : "The " + p + " of " + name + " is " + value + ".";
+const label = p === "ceo" ? "CEO" : p;
+const speech = p === "founded" ? name + " was founded on " + value + "." : p === "born" ? name + " was born on " + value + "." : p === "died" ? name + " died on " + value + "." : "The " + label + " of " + name + " is " + value + ".";
 return { speech, data: { entity: name, property: p } };`,
   },
   {

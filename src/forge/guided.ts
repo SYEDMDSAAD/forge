@@ -207,7 +207,8 @@ const NAMES: Record<string, string[]> = {
 const spoken = (v: string) => [v.toLowerCase(), ...(NAMES[v.toLowerCase()] ?? [])];
 // Short values that are everyday words, so their presence proves nothing.
 const COMMON = new Set(["in", "a", "an", "it", "is", "on", "at", "to", "no"]);
-const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// "/" too: the pattern is written as a /regex/ literal in the test ("2340*15/100").
+const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 export function buildSpec(request: string, plan: Plan, src: Source, code: string): ToolSpec {
   const properties: Record<string, unknown> = {};
@@ -219,7 +220,13 @@ export function buildSpec(request: string, plan: Plan, src: Source, code: string
     if (!i.optional) required.push(key);
     if (!i.optional || i.example.trim()) input[key] = i.type === "number" ? Number(i.example) : i.example;
   }
-  const tests: ToolSpec["tests"] = [{ name: "example", input, assert: speechAssert(request, src.kind), ...(src.reference ? { reference: src.reference } : {}) }];
+  // A value the answer must name when given ("tomorrow"): code that ignores it answers another question.
+  const said = (values: Record<string, unknown>) =>
+    (src.tool?.inputs ?? [])
+      .filter((i) => i.said && typeof values[toSnake(i.name)] === "string" && String(values[toSnake(i.name)]).trim())
+      .map((i) => ` && /\\b${escape(String(values[toSnake(i.name)]).trim())}\\b/i.test(result.speech)`)
+      .join("");
+  const tests: ToolSpec["tests"] = [{ name: "example", input, assert: speechAssert(request, src.kind) + said(input), ...(src.reference ? { reference: src.reference } : {}) }];
   // The same skill with different values: an answer that still names the first
   // ones (a word, a coin, a city) has them fixed in its code.
   const other: Record<string, unknown> = { ...input };
@@ -236,7 +243,7 @@ export function buildSpec(request: string, plan: Plan, src: Source, code: string
     tests.push({
       name: "another input",
       input: other,
-      assert: [speechAssert(request, src.kind), ...fixed.flatMap(([, v]) => spoken(String(v))).filter((w) => !COMMON.has(w)).map((w) => `!/\\b${escape(w)}${w.length <= 3 ? "\\b" : ""}/i.test(result.speech)`)].join(" && "),
+      assert: [speechAssert(request, src.kind) + said(other), ...fixed.flatMap(([, v]) => spoken(String(v))).filter((w) => !COMMON.has(w)).map((w) => `!/\\b${escape(w)}${w.length <= 3 ? "\\b" : ""}/i.test(result.speech)`)].join(" && "),
       ...(src.reference ? { reference: src.reference } : {}),
     });
   const description = plan.description.length >= 20 ? plan.description : `${plan.description || plan.title}. Use for ${src.useFor}.`;
